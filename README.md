@@ -13,6 +13,7 @@
   <img src="https://img.shields.io/badge/Metadata%20Catalog-67%2C594%20Titles-cyan?style=flat-square" alt="Catalog" />
   <img src="https://img.shields.io/badge/Consoles-35%20Systems-purple?style=flat-square" alt="Consoles" />
   <a href="https://github.com/NightKnight24/OmniVault/releases"><img src="https://img.shields.io/github/v/release/NightKnight24/OmniVault?label=Release&style=flat-square&color=emerald" alt="Release" /></a>
+  <a href="https://github.com/NightKnight24/homebrew-omnivault"><img src="https://img.shields.io/badge/Homebrew-Tap-FBB040?style=flat-square&logo=homebrew&logoColor=black" alt="Homebrew Tap" /></a>
   <a href="https://github.com/NightKnight24/OmniVault/issues"><img src="https://img.shields.io/github/issues/NightKnight24/OmniVault?style=flat-square&color=blue" alt="Issues" /></a>
   <a href="https://github.com/NightKnight24/OmniVault/discussions"><img src="https://img.shields.io/badge/Discussions-Join%20Community-purple?style=flat-square" alt="Discussions" /></a>
   <a href="https://github.com/NightKnight24/OmniVault"><img src="https://visitor-badge.laobi.icu/badge?page_id=NightKnight24.OmniVault&left_color=gray&right_color=blue" alt="Live Visitors" /></a>
@@ -34,25 +35,26 @@
 
 ## 🚀 Quick Start Guide
 
-### 1. Requirements
-- macOS 13.0 (Ventura) or later (Apple Silicon M1/M2/M3/M4 recommended).
-- Python 3.11+ (or [uv](https://github.com/astral-sh/uv) package manager).
-- Homebrew (recommended for standalone emulator dependencies).
+### Option A: Install via Homebrew (Recommended)
+You can install OmniVault with one command via our official Homebrew tap:
+```bash
+brew tap NightKnight24/omnivault
+brew install --cask omnivault
+```
 
-### 2. Launch OmniVault
-Clone the repository and run the launcher:
+### Option B: Download Pre-compiled App (Zero Setup)
+Download the standalone native macOS Apple Silicon app directly from **[GitHub Releases](https://github.com/NightKnight24/OmniVault/releases/latest)**:
+1. Download **`OmniVault-v1.0.0-macOS-arm64.zip`**.
+2. Unzip and drag `OmniVault.app` to your `/Applications` folder.
+3. Double-click to launch!
+
+### Option C: Run From Source
+Requirements: macOS 13.0+, Python 3.11+ / `uv`.
 ```bash
 git clone https://github.com/NightKnight24/OmniVault.git
 cd OmniVault
 ./run.sh
 ```
-
-*(Alternatively, download the pre-compiled macOS release archive from the [GitHub Releases](https://github.com/NightKnight24/OmniVault/releases) tab).*
-
-On first launch, OmniVault automatically:
-1. Decompresses the clean 67k-title database (`vault.db.gz`).
-2. Configures a local Python virtual environment.
-3. Launches the native standalone desktop application window.
 
 ---
 
