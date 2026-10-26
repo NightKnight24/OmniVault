@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Radial Glow -->
+    <radialGradient id="bgGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.35" />
+      <stop offset="50%" stop-color="#8b5cf6" stop-opacity="0.15" />
+      <stop offset="100%" stop-color="#050811" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Outer Vault Bezel Gradient -->
+    <linearGradient id="vaultBezel" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="35%" stop-color="#1e293b" />
+      <stop offset="70%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+
+    <!-- Core Vault Door Gradient -->
+    <linearGradient id="doorPlate" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="50%" stop-color="#090d16" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+
+    <!-- Neon Circuit Glow Gradient -->
+    <linearGradient id="neonCyan" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00f0ff" />
+      <stop offset="100%" stop-color="#3b82f6" />
+    </linearGradient>
+
+    <linearGradient id="neonPink" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ec4899" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+
+    <linearGradient id="goldContact" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="50%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+
+    <!-- Drop Shadows & Glow Filters -->
+    <filter id="neonBlur" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <filter id="heavyGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="12" result="blur1" />
+      <feGaussianBlur stdDeviation="4" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur1" />
+        <feMergeNode in="blur2" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Ambient Glow -->
+  <circle cx="256" cy="256" r="240" fill="url(#bgGlow)" />
+
+  <!-- Outer Vault Hexagonal Armored Frame -->
+  <polygon points="256,24 456,139 456,373 256,488 56,373 56,139" 
+           fill="url(#doorPlate)" 
+           stroke="url(#vaultBezel)" 
+           stroke-width="12" 
+           stroke-linejoin="round" />
+
+  <!-- Inner Hexagonal Groove -->
+  <polygon points="256,48 432,150 432,362 256,464 80,362 80,150" 
+           fill="none" 
+           stroke="#00f0ff" 
+           stroke-width="3" 
+           stroke-opacity="0.4" 
+           stroke-dasharray="16, 8" />
+
+  <!-- Corner Rivets -->
+  <circle cx="256" cy="40" r="5" fill="#38bdf8" />
+  <circle cx="444" cy="148" r="5" fill="#38bdf8" />
+  <circle cx="444" cy="364" r="5" fill="#8b5cf6" />
+  <circle cx="256" cy="472" r="5" fill="#8b5cf6" />
+  <circle cx="68" cy="364" r="5" fill="#8b5cf6" />
+  <circle cx="68" cy="148" r="5" fill="#38bdf8" />
+
+  <!-- ROM Cartridge Connector Teeth / Gold PCB Edge at Top -->
+  <g transform="translate(160, 68)">
+    <rect x="0" y="0" width="16" height="24" rx="2" fill="url(#goldContact)" opacity="0.9" />
+    <rect x="28" y="0" width="16" height="24" rx="2" fill="url(#goldContact)" opacity="0.9" />
+    <rect x="56" y="0" width="16" height="24" rx="2" fill="url(#goldContact)" opacity="0.9" />
+    <rect x="84" y="0" width="16" height="24" rx="2" fill="url(#goldContact)" opacity="0.9" />
+    <rect x="112" y="0" width="16" height="24" rx="2" fill="url(#goldContact)" opacity="0.9" />
+    <rect x="140" y="0" width="16" height="24" rx="2" fill="url(#goldContact)" opacity="0.9" />
+    <rect x="168" y="0" width="16" height="24" rx="2" fill="url(#goldContact)" opacity="0.9" />
+  </g>
+
+  <!-- Circular Vault Door Portal -->
+  <circle cx="256" cy="268" r="148" fill="#070c18" stroke="#1e293b" stroke-width="8" />
+  <circle cx="256" cy="268" r="140" fill="none" stroke="url(#neonCyan)" stroke-width="4" filter="url(#neonBlur)" />
+
+  <!-- Stepped Vault Chamber Dial Ring -->
+  <circle cx="256" cy="268" r="120" fill="#0b1324" stroke="rgba(255,255,255,0.08)" stroke-width="2" />
+  <circle cx="256" cy="268" r="114" fill="none" stroke="#8b5cf6" stroke-width="2" stroke-dasharray="8, 12" opacity="0.6" />
+
+  <!-- Central Holographic Game Console Emblem: D-Pad & Diamond Action Buttons -->
+  
+  <!-- Left Side: Retro Directional D-Pad (Glowing Cyan) -->
+  <g transform="translate(176, 236)" filter="url(#neonBlur)">
+    <!-- Horizontal Cross Bar -->
+    <rect x="0" y="20" width="68" height="24" rx="4" fill="#0ea5e9" stroke="#38bdf8" stroke-width="2" />
+    <!-- Vertical Cross Bar -->
+    <rect x="22" y="-2" width="24" height="68" rx="4" fill="#0ea5e9" stroke="#38bdf8" stroke-width="2" />
+    <!-- Center Pivot Accent -->
+    <circle cx="34" cy="32" r="5" fill="#0284c7" />
+  </g>
+
+  <!-- Right Side: Four Classic Action Buttons (Diamond Formation) -->
+  <g transform="translate(290, 236)" filter="url(#neonBlur)">
+    <!-- Top Button (North / Y) -->
+    <circle cx="36" cy="6" r="10" fill="#ec4899" stroke="#f472b6" stroke-width="2" />
+    <!-- Left Button (West / X) -->
+    <circle cx="12" cy="30" r="10" fill="#3b82f6" stroke="#60a5fa" stroke-width="2" />
+    <!-- Right Button (East / B) -->
+    <circle cx="60" cy="30" r="10" fill="#ef4444" stroke="#f87171" stroke-width="2" />
+    <!-- Bottom Button (South / A) -->
+    <circle cx="36" cy="54" r="10" fill="#10b981" stroke="#34d399" stroke-width="2" />
+  </g>
+
+  <!-- Central Crystal Power Gem (Omni Core) -->
+  <polygon points="256,242 268,268 256,294 244,268" 
+           fill="#ffffff" 
+           stroke="#00f0ff" 
+           stroke-width="2" 
+           filter="url(#heavyGlow)" />
+
+  <!-- Laser Radiating Lines from Center -->
+  <line x1="256" y1="120" x2="256" y2="148" stroke="#00f0ff" stroke-width="3" stroke-linecap="round" opacity="0.8" />
+  <line x1="256" y1="388" x2="256" y2="416" stroke="#8b5cf6" stroke-width="3" stroke-linecap="round" opacity="0.8" />
+  <line x1="108" y1="268" x2="136" y2="268" stroke="#00f0ff" stroke-width="3" stroke-linecap="round" opacity="0.8" />
+  <line x1="376" y1="268" x2="404" y2="268" stroke="#ec4899" stroke-width="3" stroke-linecap="round" opacity="0.8" />
+
+  <!-- Diagonal Sub-Tracers -->
+  <line x1="152" y1="164" x2="172" y2="184" stroke="rgba(0, 240, 255, 0.4)" stroke-width="2" />
+  <line x1="360" y1="164" x2="340" y2="184" stroke="rgba(236, 72, 153, 0.4)" stroke-width="2" />
+  <line x1="152" y1="372" x2="172" y2="352" stroke="rgba(139, 92, 246, 0.4)" stroke-width="2" />
+  <line x1="360" y1="372" x2="340" y2="352" stroke="rgba(16, 185, 129, 0.4)" stroke-width="2" />
+</svg>

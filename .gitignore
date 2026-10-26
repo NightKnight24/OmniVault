@@ -1,0 +1,55 @@
+# ==============================================================================
+# OmniVault Git Ignore Rules
+# ==============================================================================
+
+# Large Database & AI Neural Models (>100MB GitHub limit)
+# Note: Clean master catalog is distributed via backend/data/vault.db.gz (10.6 MB)
+backend/data/vault.db
+backend/data/vault.db.bak
+backend/data/vault.db-shm
+backend/data/vault.db-wal
+backend/data/models/*.gguf
+backend/data/models/*.part
+backend/data/covers_cache/*
+!backend/data/covers_cache/.gitkeep
+
+# Python Environments & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/.venv/
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+
+# Frontend Node Dependencies
+frontend/node_modules/
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# macOS System Files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+
+# Logs & Temporary Files
+*.log
+/tmp/
+.storage_config.json
+*.swp
+*.swo

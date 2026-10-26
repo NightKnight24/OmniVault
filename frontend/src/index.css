@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+}
+
+/* Modern Web Guidance Compliance for Modal Dialogs */
+dialog:modal {
+  /* Prevent scroll gestures inside the modal from chaining to the page */
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  /* Set overflow: hidden so ::backdrop becomes a non-scrollable scroll container
+     that honors overscroll-behavior, trapping scroll gestures */
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background-color: rgba(4, 7, 13, 0.85);
+  backdrop-filter: blur(8px);
+}
+
+/* Custom Sleek Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #080c14;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+.font-display {
+  font-family: 'Chakra Petch', sans-serif;
+}
