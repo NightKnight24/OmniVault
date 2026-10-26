@@ -29,12 +29,30 @@ cp -R "$SOURCE_DIR/backend/data" "$RESOURCES_DIR/backend/data"
 cp -R "$SOURCE_DIR/backend/pyproject.toml" "$RESOURCES_DIR/backend/"
 cp -R "$SOURCE_DIR/backend/README.md" "$RESOURCES_DIR/backend/"
 
-# Ensure backend .venv inside Resources has all dependencies
-if [ ! -d "$RESOURCES_DIR/backend/.venv" ]; then
-    echo "-> Initializing bundled Python Virtual Environment..."
-    uv venv "$RESOURCES_DIR/backend/.venv"
-    uv pip install --python "$RESOURCES_DIR/backend/.venv/bin/python" fastapi "uvicorn[standard]" httpx pydantic python-multipart llama-cpp-python
+# Ensure bundled standalone Python runtime is present
+STANDALONE_PY_SRC="$(find "$HOME/.local/share/uv/python" -type d -name "cpython-3.14*-macos-aarch64-none" -print -quit 2>/dev/null || true)"
+if [ ! -d "$RESOURCES_DIR/python" ]; then
+    echo "-> Packaging Bundled Standalone Python runtime..."
+    if [ -n "$STANDALONE_PY_SRC" ] && [ -d "$STANDALONE_PY_SRC" ]; then
+        cp -R "$STANDALONE_PY_SRC" "$RESOURCES_DIR/python"
+    else
+        echo "Error: Standalone Python build not found."
+        exit 1
+    fi
+    echo "-> Installing backend dependencies into bundled runtime..."
+    uv pip install --python "$RESOURCES_DIR/python/bin/python3" --break-system-packages fastapi "uvicorn[standard]" httpx pydantic python-multipart
+    
+    # Sanitize dylib ID and sysconfig paths for complete relocation portability & privacy
+    if [ -f "$RESOURCES_DIR/python/lib/libpython3.14.dylib" ]; then
+        install_name_tool -id @rpath/libpython3.14.dylib "$RESOURCES_DIR/python/lib/libpython3.14.dylib" 2>/dev/null || true
+    fi
+    find "$RESOURCES_DIR/python" -name "_sysconfigdata*.py" -exec sed -i '' "s|$STANDALONE_PY_SRC|/Applications/OmniVault.app/Contents/Resources/python|g" {} + 2>/dev/null || true
 fi
+
+# Clean up dev venv or backup files inside Resources to ensure clean standalone app
+rm -rf "$RESOURCES_DIR/backend/.venv" "$RESOURCES_DIR/backend/data/vault.db.bak" "$RESOURCES_DIR/backend/data/vault.db-shm" "$RESOURCES_DIR/backend/data/vault.db-wal"
+find "$RESOURCES_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+find "$RESOURCES_DIR" -name ".DS_Store" -delete 2>/dev/null || true
 
 # 3. Create Info.plist
 cat << 'EOF' > "$CONTENTS_DIR/Info.plist"
@@ -238,7 +256,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         guard let resourcePath = bundle.resourcePath else { return }
         
         let backendDir = (resourcePath as NSString).appendingPathComponent("backend")
-        let pythonPath = (backendDir as NSString).appendingPathComponent(".venv/bin/python")
+        let bundledPython = (resourcePath as NSString).appendingPathComponent("python/bin/python3")
+        let venvPython = (backendDir as NSString).appendingPathComponent(".venv/bin/python")
+        
+        var pythonPath = bundledPython
+        if !FileManager.default.fileExists(atPath: pythonPath) {
+            if FileManager.default.fileExists(atPath: venvPython) {
+                pythonPath = venvPython
+            } else {
+                pythonPath = "/usr/bin/python3"
+            }
+        }
         
         let process = Process()
         process.executableURL = URL(fileURLWithPath: pythonPath)
@@ -252,7 +280,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         process.currentDirectoryURL = URL(fileURLWithPath: backendDir)
         
         var env = ProcessInfo.processInfo.environment
-        env["PATH"] = "\(backendDir)/.venv/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin"
+        let pyBinDir = (pythonPath as NSString).deletingLastPathComponent
+        env["PATH"] = "\(pyBinDir):/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin"
         env["PYTHONPATH"] = backendDir
         process.environment = env
         
