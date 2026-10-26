@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OmniVault • Native macOS Retro Gaming Hub & Catalog</title>
+  <meta name="description" content="A high-performance, native macOS Apple Silicon retro gaming preservation hub, 67k offline catalog, and standalone emulator launcher powered by Bring Your Own Sources (BYOS).">
+  <meta name="keywords" content="OmniVault, macOS, Apple Silicon, Retro Gaming, Emulation, ROM Manager, RetroArch, OpenEmu, Game Preservation, BYOS">
+  
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://nightknight24.github.io/OmniVault/">
+  <meta property="og:title" content="OmniVault • Native macOS Retro Gaming Hub">
+  <meta property="og:description" content="Native macOS Apple Silicon retro gaming preservation hub, 67k offline catalog, and controller quick menu (BYOS).">
+  <meta property="og:image" content="https://nightknight24.github.io/OmniVault/icon.svg">
+
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:url" content="https://nightknight24.github.io/OmniVault/">
+  <meta property="twitter:title" content="OmniVault • Native macOS Retro Gaming Hub">
+  <meta property="twitter:description" content="Native macOS Apple Silicon retro gaming preservation hub, 67k offline catalog, and controller quick menu (BYOS).">
+  <meta property="twitter:image" content="https://nightknight24.github.io/OmniVault/icon.svg">
+
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <style>
+    :root {
+      --bg: #070b12;
+      --card: rgba(15, 23, 42, 0.75);
+      --border: rgba(56, 189, 248, 0.2);
+      --primary: #00d2ff;
+      --accent: #3b82f6;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: radial-gradient(circle at top center, #0f1c30 0%, #070b12 70%);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      line-height: 1.6;
+    }
+    header {
+      padding: 24px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      max-width: 1200px;
+      width: 100%;
+      margin: 0 auto;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-weight: 800;
+      font-size: 22px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #fff;
+      text-decoration: none;
+    }
+    .brand img { width: 38px; height: 38px; filter: drop-shadow(0 0 12px rgba(0, 210, 255, 0.5)); }
+    nav a {
+      color: var(--text-muted);
+      text-decoration: none;
+      margin-left: 20px;
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    nav a:hover { color: var(--primary); }
+    .hero {
+      max-width: 900px;
+      margin: 60px auto 40px;
+      text-align: center;
+      padding: 0 24px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0, 210, 255, 0.1);
+      border: 1px solid var(--border);
+      padding: 6px 16px;
+      border-radius: 9999px;
+      font-size: 13px;
+      color: var(--primary);
+      margin-bottom: 24px;
+      font-weight: 600;
+    }
+    h1 {
+      font-size: clamp(38px, 6vw, 64px);
+      font-weight: 900;
+      letter-spacing: -1.5px;
+      line-height: 1.1;
+      margin-bottom: 24px;
+      background: linear-gradient(135deg, #ffffff 40%, #00d2ff 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    p.lead {
+      font-size: 18px;
+      color: var(--text-muted);
+      max-width: 680px;
+      margin: 0 auto 36px;
+    }
+    .cta-group {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #00d2ff, #0284c7);
+      color: #070b12;
+      font-weight: 700;
+      font-size: 15px;
+      padding: 14px 28px;
+      border-radius: 12px;
+      text-decoration: none;
+      box-shadow: 0 0 25px rgba(0, 210, 255, 0.4);
+      transition: transform 0.2s, box-shadow 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 35px rgba(0, 210, 255, 0.6);
+    }
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+      font-weight: 600;
+      font-size: 15px;
+      padding: 14px 28px;
+      border-radius: 12px;
+      text-decoration: none;
+      transition: background 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .btn-secondary:hover { background: rgba(255, 255, 255, 0.1); }
+    .terminal-box {
+      background: #04070e;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 14px;
+      padding: 16px 24px;
+      display: inline-flex;
+      align-items: center;
+      gap: 16px;
+      font-family: ui-monospace, Menlo, Monaco, monospace;
+      font-size: 14px;
+      color: #38bdf8;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+    }
+    .terminal-box span.prompt { color: #64748b; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 24px;
+      max-width: 1100px;
+      width: 100%;
+      margin: 40px auto;
+      padding: 0 24px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 28px;
+      backdrop-filter: blur(12px);
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .card:hover {
+      border-color: rgba(0, 210, 255, 0.5);
+      transform: translateY(-3px);
+    }
+    .card-icon {
+      font-size: 28px;
+      margin-bottom: 14px;
+    }
+    .card h3 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+    .card p {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+    footer {
+      margin-top: auto;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 32px 24px;
+      text-align: center;
+      font-size: 13px;
+      color: #64748b;
+    }
+    footer a { color: var(--primary); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="#" class="brand">
+      <img src="icon.svg" alt="OmniVault Logo">
+      OmniVault
+    </a>
+    <nav>
+      <a href="https://github.com/NightKnight24/OmniVault" target="_blank">GitHub</a>
+      <a href="https://github.com/NightKnight24/OmniVault/releases" target="_blank">Releases</a>
+      <a href="https://github.com/NightKnight24/homebrew-omnivault" target="_blank">Homebrew Tap</a>
+      <a href="https://github.com/NightKnight24/OmniVault/discussions" target="_blank">Discussions</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="badge">🚀 Version 1.0.0 Live on Apple Silicon</div>
+      <h1>The Sovereign Retro Preservation Hub</h1>
+      <p class="lead">A native macOS 13+ application engineered to organize, enhance, and launch classic games across 35 platforms with an offline 67,000+ title catalog and zero cloud tracking.</p>
+
+      <div class="cta-group">
+        <a href="https://github.com/NightKnight24/OmniVault/releases/download/v1.0.0/OmniVault-v1.0.0-macOS-arm64.zip" class="btn-primary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download for macOS (Apple Silicon)
+        </a>
+        <a href="https://github.com/NightKnight24/OmniVault" class="btn-secondary" target="_blank">
+          View on GitHub ★
+        </a>
+      </div>
+
+      <div class="terminal-box">
+        <code><span class="prompt">$</span> brew tap NightKnight24/omnivault && brew install --cask omnivault</code>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <div class="card-icon">⚡</div>
+        <h3>100% Native & Standalone</h3>
+        <p>Built with Swift and Metal for macOS Apple Silicon. Zero Python, uv, or terminal prerequisites for end users. Just download, drag to Applications, and play.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon">📚</div>
+        <h3>67,000+ Offline Title Catalog</h3>
+        <p>Ships with an offline encyclopedia of metadata, release dates, box art, and lore for 35 classic consoles—from NES, Genesis, and PS1 to GameCube, PS4, and Switch.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon">🎮</div>
+        <h3>Universal Quick Menu</h3>
+        <p>Background controller monitoring triggers an instant overlay over any running emulator via <code>Home</code>, <code>Select+Start</code>, or <code>L3+R3</code> to manage save states and shaders.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon">🛡️</div>
+        <h3>Bring Your Own Sources (BYOS)</h3>
+        <p>Zero copyrighted ROMs are bundled or hosted. OmniVault is 100% legally compliant, connecting to your personal SSD, NAS, or public archive collections.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon">💾</div>
+        <h3>Save-State Snapshot Engine</h3>
+        <p>Time-machine backups automatically snapshot save states after boss fights or long sessions, preventing accidental file corruption or overwrite.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon">🧠</div>
+        <h3>Embedded Local Neural Copilot</h3>
+        <p>OmniAI runs local quantized LLMs on Apple Silicon Metal GPUs. Ask for level walkthroughs, secret unlock codes, or save-file diffs completely offline.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Released under the <a href="https://github.com/NightKnight24/OmniVault/blob/main/LICENSE" target="_blank">MIT License</a>. Created by <a href="https://github.com/NightKnight24" target="_blank">NightKnight24</a>.</p>
+  </footer>
+</body>
+</html>
