@@ -11,8 +11,9 @@ echo "=== Building Native macOS OmniVault.app on /Volumes/ROMS ==="
 
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-# 1. Copy frontend build into Resources
-echo "-> Packaging Frontend Assets & Brand Icon..."
+# 1. Build & copy frontend into Resources
+echo "-> Building & Packaging Frontend Assets & Brand Icon..."
+(cd "$SOURCE_DIR/frontend" && npm run build)
 mkdir -p "$RESOURCES_DIR/frontend"
 rm -rf "$RESOURCES_DIR/frontend/dist"
 cp -R "$SOURCE_DIR/frontend/dist" "$RESOURCES_DIR/frontend/dist"
@@ -29,7 +30,7 @@ cp -R "$SOURCE_DIR/backend/data" "$RESOURCES_DIR/backend/data"
 cp -R "$SOURCE_DIR/backend/pyproject.toml" "$RESOURCES_DIR/backend/"
 cp -R "$SOURCE_DIR/backend/README.md" "$RESOURCES_DIR/backend/"
 
-# Ensure bundled standalone Python runtime is present
+# Ensure bundled standalone Python runtime is present & up to date
 STANDALONE_PY_SRC="$(find "$HOME/.local/share/uv/python" -type d -name "cpython-3.14*-macos-aarch64-none" -print -quit 2>/dev/null || true)"
 if [ ! -d "$RESOURCES_DIR/python" ]; then
     echo "-> Packaging Bundled Standalone Python runtime..."
@@ -39,15 +40,36 @@ if [ ! -d "$RESOURCES_DIR/python" ]; then
         echo "Error: Standalone Python build not found."
         exit 1
     fi
-    echo "-> Installing backend dependencies into bundled runtime..."
-    uv pip install --python "$RESOURCES_DIR/python/bin/python3" --break-system-packages fastapi "uvicorn[standard]" httpx pydantic python-multipart
-    
-    # Sanitize dylib ID and sysconfig paths for complete relocation portability & privacy
-    if [ -f "$RESOURCES_DIR/python/lib/libpython3.14.dylib" ]; then
-        install_name_tool -id @rpath/libpython3.14.dylib "$RESOURCES_DIR/python/lib/libpython3.14.dylib" 2>/dev/null || true
-    fi
+fi
+
+echo "-> Installing/verifying all backend dependencies in bundled runtime..."
+uv pip install --python "$RESOURCES_DIR/python/bin/python3" --break-system-packages \
+    fastapi "uvicorn[standard]" httpx pydantic python-multipart beautifulsoup4 llama-cpp-python
+
+# Sanitize dylib ID and sysconfig paths for complete relocation portability & privacy
+if [ -f "$RESOURCES_DIR/python/lib/libpython3.14.dylib" ]; then
+    install_name_tool -id @rpath/libpython3.14.dylib "$RESOURCES_DIR/python/lib/libpython3.14.dylib" 2>/dev/null || true
+    codesign --force --sign - "$RESOURCES_DIR/python/lib/libpython3.14.dylib" 2>/dev/null || true
+fi
+if [ -n "$STANDALONE_PY_SRC" ]; then
     find "$RESOURCES_DIR/python" -name "_sysconfigdata*.py" -exec sed -i '' "s|$STANDALONE_PY_SRC|/Applications/OmniVault.app/Contents/Resources/python|g" {} + 2>/dev/null || true
 fi
+
+# Sanitize any embedded local build-cache paths in compiled C++ extension dylibs (exact byte-length replacement)
+python3 - "$RESOURCES_DIR/python" << 'PYEOF'
+import sys, pathlib
+root = pathlib.Path(sys.argv[1])
+local_user = pathlib.Path.home().name.encode("utf-8")
+if local_user and local_user.lower() != b"nightknight24":
+    base = b"nightknight24"
+    repl = (base * ((len(local_user) // len(base)) + 1))[:len(local_user)]
+    assert len(local_user) == len(repl)
+    for p in root.rglob("*"):
+        if p.is_file() and not p.is_symlink() and p.suffix in (".dylib", ".so", ".py", ".cfg", ".json"):
+            data = p.read_bytes()
+            if local_user in data:
+                p.write_bytes(data.replace(local_user, repl))
+PYEOF
 
 # Clean up dev venv or backup files inside Resources to ensure clean standalone app
 rm -rf "$RESOURCES_DIR/backend/.venv" "$RESOURCES_DIR/backend/data/vault.db.bak" "$RESOURCES_DIR/backend/data/vault.db-shm" "$RESOURCES_DIR/backend/data/vault.db-wal"
@@ -73,15 +95,23 @@ cat << 'EOF' > "$CONTENTS_DIR/Info.plist"
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>1.0.1</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSRequiresAquaSystemAppearance</key>
     <false/>
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>OmniVault accesses your external drive to load your ROM library, emulators, and save states.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>OmniVault accesses Downloads to import ROMs, BIOS files, and patches.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>OmniVault accesses Documents to manage your retro game folders and save backups.</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>OmniVault accesses Desktop to import game files.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoads</key>
@@ -97,6 +127,7 @@ cat << 'EOF' > /tmp/OmniVaultMain.swift
 import Cocoa
 import WebKit
 import GameController
+import SQLite3
 
 class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKScriptMessageHandler {
     var window: NSWindow!
@@ -162,7 +193,40 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         pollServerAndLoad()
     }
     
+    func resolveCatalogCount() -> String {
+        var count = 67594
+        var candidates: [String] = []
+        let appSupportDB = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Application Support/OmniVault/data/vault.db")
+        candidates.append(appSupportDB)
+        if let resourcePath = Bundle.main.resourcePath {
+            candidates.append((resourcePath as NSString).appendingPathComponent("backend/data/vault.db"))
+        }
+        for dbPath in candidates {
+            if FileManager.default.fileExists(atPath: dbPath) {
+                var db: OpaquePointer?
+                if sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK {
+                    defer { sqlite3_close(db) }
+                    var stmt: OpaquePointer?
+                    if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM games;", -1, &stmt, nil) == SQLITE_OK {
+                        defer { sqlite3_finalize(stmt) }
+                        if sqlite3_step(stmt) == SQLITE_ROW {
+                            let dbCount = Int(sqlite3_column_int64(stmt, 0))
+                            if dbCount > 0 {
+                                count = dbCount
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: count)) ?? "\(count)"
+    }
+
     func showSplashScreen() {
+        let formattedCount = resolveCatalogCount()
         let splashHTML = """
         <!DOCTYPE html>
         <html>
@@ -217,6 +281,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
               color: #94a3b8;
               margin: 0;
               letter-spacing: 0.5px;
+              max-width: 520px;
+              text-align: center;
+              padding: 0 16px;
             }
             .badge {
               margin-top: 18px;
@@ -235,8 +302,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
             <div class="spinner"></div>
           </div>
           <h1>OmniVault</h1>
-          <p>Booting Neural Retro Engine & Catalog...</p>
-          <div class="badge">73,906 Preserved Titles</div>
+          <p id="boot-status">Booting Neural Retro Engine & Catalog...</p>
+          <div class="badge">\(formattedCount) Preserved Titles</div>
         </body>
         </html>
         """
@@ -252,30 +319,40 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
     }
     
     func startBackendServer() {
+        if let existing = self.serverProcess, existing.isRunning { return }
         let bundle = Bundle.main
         guard let resourcePath = bundle.resourcePath else { return }
         
         let backendDir = (resourcePath as NSString).appendingPathComponent("backend")
+        let bundledPython314 = (resourcePath as NSString).appendingPathComponent("python/bin/python3.14")
         let bundledPython = (resourcePath as NSString).appendingPathComponent("python/bin/python3")
         let venvPython = (backendDir as NSString).appendingPathComponent(".venv/bin/python")
         
-        var pythonPath = bundledPython
+        var pythonPath = bundledPython314
         if !FileManager.default.fileExists(atPath: pythonPath) {
-            if FileManager.default.fileExists(atPath: venvPython) {
-                pythonPath = venvPython
+            if FileManager.default.fileExists(atPath: bundledPython) {
+                pythonPath = (bundledPython as NSString).resolvingSymlinksInPath
+            } else if FileManager.default.fileExists(atPath: venvPython) {
+                pythonPath = (venvPython as NSString).resolvingSymlinksInPath
             } else {
                 pythonPath = "/usr/bin/python3"
             }
         }
         
+        let logUrl = URL(fileURLWithPath: "/tmp/omnivault_app.log")
+        if !FileManager.default.fileExists(atPath: logUrl.path) {
+            FileManager.default.createFile(atPath: logUrl.path, contents: nil)
+        }
+        
         let process = Process()
         process.executableURL = URL(fileURLWithPath: pythonPath)
         process.arguments = [
+            "-B",
             "-m", "uvicorn",
             "app.main:app",
             "--host", "127.0.0.1",
             "--port", "\(port)",
-            "--log-level", "warning"
+            "--log-level", "info"
         ]
         process.currentDirectoryURL = URL(fileURLWithPath: backendDir)
         
@@ -283,11 +360,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         let pyBinDir = (pythonPath as NSString).deletingLastPathComponent
         env["PATH"] = "\(pyBinDir):/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin"
         env["PYTHONPATH"] = backendDir
+        env["PYTHONUNBUFFERED"] = "1"
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
         process.environment = env
         
-        let logUrl = URL(fileURLWithPath: "/tmp/omnivault_app.log")
-        FileManager.default.createFile(atPath: logUrl.path, contents: nil)
         if let fileHandle = try? FileHandle(forWritingTo: logUrl) {
+            _ = try? fileHandle.seekToEnd()
             process.standardOutput = fileHandle
             process.standardError = fileHandle
         }
@@ -296,7 +374,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
             try process.run()
             self.serverProcess = process
         } catch {
-            print("Failed to run backend: \(error)")
+            let msg = "Failed to run backend (\(pythonPath)): \(error)\n"
+            if let data = msg.data(using: .utf8), let fh = try? FileHandle(forWritingTo: logUrl) {
+                _ = try? fh.seekToEnd()
+                try? fh.write(contentsOf: data)
+                try? fh.close()
+            }
         }
     }
     
@@ -318,7 +401,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
                     self.webView.load(req)
                 }
             } else {
-                let delay = attempt < 20 ? 0.2 : 0.5
+                if attempt > 0 && attempt % 6 == 0 {
+                    DispatchQueue.main.async {
+                        if self.serverProcess == nil || !(self.serverProcess?.isRunning ?? false) {
+                            if attempt >= 12, let logStr = try? String(contentsOfFile: "/tmp/omnivault_app.log", encoding: .utf8) {
+                                let lastLine = logStr.components(separatedBy: .newlines).last(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? ""
+                                if !lastLine.isEmpty {
+                                    let safe = lastLine.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+                                    self.webView.evaluateJavaScript("var el=document.getElementById('boot-status'); if(el) el.innerText='Retrying engine: \(safe)';", completionHandler: nil)
+                                }
+                            }
+                            self.startBackendServer()
+                        }
+                    }
+                }
+                let delay = attempt < 20 ? 0.25 : 0.5
                 DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
                     self.pollServerAndLoad(attempt: attempt + 1)
                 }
@@ -463,7 +560,15 @@ app.delegate = delegate
 app.run()
 EOF
 
-swiftc -O -target arm64-apple-macosx13.0 /tmp/OmniVaultMain.swift -o "$MACOS_DIR/OmniVault"
+swiftc -O -lsqlite3 -target arm64-apple-macosx13.0 /tmp/OmniVaultMain.swift -o "$MACOS_DIR/OmniVault"
 chmod +x "$MACOS_DIR/OmniVault"
+rm -f /tmp/OmniVaultMain.swift
+
+echo "-> Signing macOS App Bundle (binding Info.plist & entitlements)..."
+xattr -cr "$APP_DIR" 2>/dev/null || true
+find "$RESOURCES_DIR/python" -type f \( -name "*.dylib" -o -name "*.so" -o -name "python3.14" \) -exec codesign --force --sign - {} \; 2>/dev/null || true
+find "$RESOURCES_DIR/backend" -type f \( -name "*.dylib" -o -name "*.so" -o -name "macos_ocr" \) -exec codesign --force --sign - {} \; 2>/dev/null || true
+codesign --force --sign - "$MACOS_DIR/OmniVault"
+codesign --force --sign - "$APP_DIR"
 
 echo "=== Successfully Synced /Volumes/ROMS/OmniVault.app! ==="

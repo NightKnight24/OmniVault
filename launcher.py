@@ -22,7 +22,7 @@ def main():
     if not PYTHON_BIN.exists():
         print("-> Setting up Python environment...")
         subprocess.run(["uv", "venv"], cwd=BACKEND_DIR, check=True)
-        subprocess.run(["uv", "pip", "install", "fastapi", "uvicorn[standard]", "httpx", "pydantic", "python-multipart"], cwd=BACKEND_DIR, check=True)
+        subprocess.run(["uv", "pip", "install", "fastapi", "uvicorn[standard]", "httpx", "pydantic", "python-multipart", "beautifulsoup4"], cwd=BACKEND_DIR, check=True)
 
     # 2. Check if frontend dist exists, if not build it
     dist_dir = ROOT_DIR / "frontend" / "dist"

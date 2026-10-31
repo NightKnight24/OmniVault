@@ -16,7 +16,7 @@ import { playClick, playVictorySound } from '../utils/soundEffects';
 import { useTheme } from '../context/ThemeContext';
 import { gamepadService } from '../services/gamepadService';
 
-export default function InitialSetupWizardModal({ isOpen, onClose, onFinish, initialStep = 1 }) {
+export default function InitialSetupWizardModal({ isOpen, onClose, onFinish, initialStep = 1, totalGames = 67594 }) {
   const [currentStep, setCurrentStep] = useState(initialStep || 1);
   const totalSteps = 6;
   const { toggleKodiMode, isKodiMode } = useTheme();
@@ -558,7 +558,7 @@ export default function InitialSetupWizardModal({ isOpen, onClose, onFinish, ini
                           <span>4. OmniVault Data & App Storage</span>
                         </div>
                         <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-violet-950 text-violet-400 border border-violet-800">
-                          73,906 Games DB
+                          {(totalGames || 67594).toLocaleString()} Games DB
                         </span>
                       </div>
                       <div className="mt-2 p-2 rounded-lg bg-black/50 border border-white/5 font-mono text-xs text-slate-200 truncate select-all">

@@ -5,24 +5,47 @@ import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-DB_DIR = Path(__file__).resolve().parent.parent / "data"
-DB_DIR.mkdir(parents=True, exist_ok=True)
+BUNDLE_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+
+def _resolve_writable_data_dir() -> Path:
+    # Never write inside a signed macOS .app bundle (prevents macOS App Management / Provenance stalls & preserves Sealed Resources)
+    if ".app/Contents/" in str(BUNDLE_DATA_DIR):
+        app_support = Path.home() / "Library" / "Application Support" / "OmniVault" / "data"
+        app_support.mkdir(parents=True, exist_ok=True)
+        return app_support
+    try:
+        BUNDLE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        probe = BUNDLE_DATA_DIR / ".write_probe"
+        probe.write_text("ok")
+        probe.unlink(missing_ok=True)
+        return BUNDLE_DATA_DIR
+    except OSError:
+        fallback = Path.home() / "Library" / "Application Support" / "OmniVault" / "data"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+DB_DIR = _resolve_writable_data_dir()
 DB_PATH = DB_DIR / "vault.db"
 
 def ensure_db_exists():
     """
-    If vault.db does not exist, automatically decompress vault.db.gz
-    shipped in the repository.
+    If vault.db does not exist or is empty, automatically restore from bundled vault.db
+    or decompress vault.db.gz shipped in the repository.
     """
-    if not DB_PATH.exists():
-        gz_path = DB_DIR / "vault.db.gz"
-        if gz_path.exists():
-            import gzip, shutil
-            print(f"-> [Database] Decompressing master catalog from {gz_path.name}...")
-            with gzip.open(gz_path, "rb") as f_in:
-                with open(DB_PATH, "wb") as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-            print(f"-> [Database] Master catalog ready ({DB_PATH.stat().st_size // (1024 * 1024)} MB).")
+    if not DB_PATH.exists() or DB_PATH.stat().st_size == 0:
+        import gzip, shutil
+        bundled_db = BUNDLE_DATA_DIR / "vault.db"
+        if bundled_db != DB_PATH and bundled_db.exists() and bundled_db.stat().st_size > 0:
+            shutil.copy2(bundled_db, DB_PATH)
+            return
+        for gz_path in (DB_DIR / "vault.db.gz", BUNDLE_DATA_DIR / "vault.db.gz"):
+            if gz_path.exists():
+                print(f"-> [Database] Decompressing master catalog from {gz_path.name}...")
+                with gzip.open(gz_path, "rb") as f_in:
+                    with open(DB_PATH, "wb") as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                print(f"-> [Database] Master catalog ready ({DB_PATH.stat().st_size // (1024 * 1024)} MB).")
+                break
 
 def get_db_connection() -> sqlite3.Connection:
     ensure_db_exists()

@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import APIRouter, Query, HTTPException, Response, Request
 from fastapi.responses import FileResponse, Response
 from typing import Optional, Dict, Any
-from ..database import get_db_connection
+from ..database import get_db_connection, DB_DIR
 
 router = APIRouter(prefix="/api/covers", tags=["Covers"])
 
@@ -30,7 +30,7 @@ TITLE_ALIASES = {
 }
 
 # Local filesystem covers cache for instant retrieval & offline availability
-COVERS_CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "covers_cache"
+COVERS_CACHE_DIR = DB_DIR / "covers_cache"
 COVERS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 def generate_procedural_cover_svg(title: str, platform: str) -> str:

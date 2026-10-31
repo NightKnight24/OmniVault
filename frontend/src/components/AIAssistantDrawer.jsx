@@ -173,7 +173,7 @@ export default function AIAssistantDrawer({
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                73,906+ Preserved Games • Retro Knowledge Engine
+                {(totalGames || 67594).toLocaleString()} Preserved Games • Retro Knowledge Engine
               </p>
             </div>
           </div>

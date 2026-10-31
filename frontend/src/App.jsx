@@ -614,6 +614,7 @@ export default function App() {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onOpenSetupWizard={() => setIsSetupWizardOpen(true)}
+        totalGames={globalVaultTotal || totalGamesCount}
       />
 
       {/* OMNIAI COPILOT ASSISTANT DRAWER */}
@@ -669,6 +670,7 @@ export default function App() {
       <InitialSetupWizardModal
         isOpen={isSetupWizardOpen}
         initialStep={setupWizardStep}
+        totalGames={globalVaultTotal || totalGamesCount}
         onClose={() => setIsSetupWizardOpen(false)}
         onFinish={() => {
           loadGames();

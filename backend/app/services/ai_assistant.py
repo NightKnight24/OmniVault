@@ -11,12 +11,13 @@ try:
 except ImportError:
     httpx = None
 
-from ..database import get_db_connection, row_to_game_dict
+from ..database import get_db_connection, row_to_game_dict, DB_DIR, BUNDLE_DATA_DIR
 
-# Model location: packaged inside OmniVault data/models
-MODEL_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "models"
+# Model location: packaged inside OmniVault data/models (or writable DB_DIR/models fallback)
+_BUNDLED_MODEL = BUNDLE_DATA_DIR / "models" / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+MODEL_DIR = DB_DIR / "models"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
-MODEL_PATH = MODEL_DIR / "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+MODEL_PATH = _BUNDLED_MODEL if _BUNDLED_MODEL.exists() else (MODEL_DIR / "qwen2.5-0.5b-instruct-q4_k_m.gguf")
 
 _LLM_INSTANCE = None
 _DOWNLOAD_STATE = {"status": "idle", "progress": 0.0, "downloaded_mb": 0.0, "total_mb": 469.0, "error": None}
