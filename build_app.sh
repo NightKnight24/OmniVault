@@ -95,9 +95,9 @@ cat << 'EOF' > "$CONTENTS_DIR/Info.plist"
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.1</string>
+    <string>1.0.2</string>
     <key>CFBundleVersion</key>
-    <string>2</string>
+    <string>3</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
@@ -136,6 +136,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
     let port = 19842
     var lastToggleTime: TimeInterval = 0
     var isLoaded = false
+    var lastLeftMouseDownEvent: NSEvent?
     
     var storefrontURL: URL {
         return URL(string: "http://127.0.0.1:\(port)")!
@@ -145,25 +146,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         NSApp.setActivationPolicy(.regular)
         
         let screenRect = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1400, height: 900)
-        let width: CGFloat = min(1440, max(1100, screenRect.width * 0.92))
-        let height: CGFloat = min(920, max(750, screenRect.height * 0.92))
+        let width: CGFloat = min(1440, max(640, floor(screenRect.width * 0.88)))
+        let height: CGFloat = min(900, max(500, floor(screenRect.height * 0.86)))
         let rect = NSRect(x: 0, y: 0, width: width, height: height)
+        let darkBg = NSColor(srgbRed: 8.0 / 255.0, green: 12.0 / 255.0, blue: 20.0 / 255.0, alpha: 1.0)
         
         window = NSWindow(
             contentRect: rect,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
+        window.appearance = NSAppearance(named: .darkAqua)
         window.center()
-        window.title = "OmniVault • Classic ROM Store"
+        window.title = "OmniVault"
         window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
+        window.titleVisibility = .visible
         window.isMovableByWindowBackground = true
-        window.backgroundColor = NSColor(red: 0.03, green: 0.05, blue: 0.08, alpha: 1.0)
+        window.backgroundColor = darkBg
         window.delegate = self
-        window.minSize = NSSize(width: 900, height: 600)
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.minSize = NSSize(width: 600, height: 450)
+        window.collectionBehavior = [.fullScreenPrimary]
+        window.setFrameAutosaveName("OmniVaultMainWindow")
+        clampWindowToVisibleScreen()
+        
+        NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            self?.lastLeftMouseDownEvent = event
+            return event
+        }
         
         let config = WKWebViewConfiguration()
         config.allowsAirPlayForMediaPlayback = true
@@ -171,18 +181,54 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
         config.defaultWebpagePreferences.allowsContentJavaScript = true
+        
+        let dragBridgeJS = """
+        (function() {
+          document.addEventListener('mousedown', function(e) {
+            if (e.button !== 0) return;
+            var dragZone = e.target && e.target.closest && e.target.closest('[data-window-drag]');
+            if (!dragZone) return;
+            var interactive = e.target.closest('button, a, input, select, textarea, label, [role="button"], [data-no-drag]');
+            if (interactive) return;
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.omnivault) {
+              window.webkit.messageHandlers.omnivault.postMessage({ action: 'startWindowDrag' });
+            }
+          }, false);
+          document.addEventListener('dblclick', function(e) {
+            var dragZone = e.target && e.target.closest && e.target.closest('[data-window-drag]');
+            if (!dragZone) return;
+            var interactive = e.target.closest('button, a, input, select, textarea, label, [role="button"], [data-no-drag]');
+            if (interactive) return;
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.omnivault) {
+              window.webkit.messageHandlers.omnivault.postMessage({ action: 'toggleWindowZoom' });
+            }
+          }, false);
+        })();
+        """
+        let dragScript = WKUserScript(source: dragBridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        config.userContentController.addUserScript(dragScript)
         config.userContentController.add(self, name: "omnivault")
         
-        webView = WKWebView(frame: window.contentView!.bounds, configuration: config)
-        webView.autoresizingMask = [.width, .height]
-        webView.setValue(false, forKey: "drawsBackground")
+        let initialBounds = window.contentView?.bounds ?? rect
+        webView = WKWebView(frame: initialBounds, configuration: config)
+        webView.underPageBackgroundColor = darkBg
         webView.navigationDelegate = self
         
         if #available(macOS 13.3, *) {
             webView.isInspectable = true
         }
         
-        window.contentView?.addSubview(webView)
+        if let contentView = window.contentView {
+            contentView.autoresizesSubviews = true
+            webView.translatesAutoresizingMaskIntoConstraints = false
+            contentView.addSubview(webView)
+            NSLayoutConstraint.activate([
+                webView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+                webView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+                webView.topAnchor.constraint(equalTo: contentView.topAnchor),
+                webView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+            ])
+        }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         
@@ -191,6 +237,70 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         cleanupOrphanedServer()
         startBackendServer()
         pollServerAndLoad()
+    }
+    
+    func clampWindowToVisibleScreen() {
+        let currentFrame = window.frame
+        let targetScreen = window.screen ?? NSScreen.main
+        guard let visible = targetScreen?.visibleFrame else { return }
+        var adjusted = currentFrame
+        if adjusted.width > visible.width {
+            adjusted.size.width = visible.width
+        }
+        if adjusted.height > visible.height {
+            adjusted.size.height = visible.height
+        }
+        if adjusted.width < window.minSize.width {
+            adjusted.size.width = min(window.minSize.width, visible.width)
+        }
+        if adjusted.height < window.minSize.height {
+            adjusted.size.height = min(window.minSize.height, visible.height)
+        }
+        if adjusted.minX < visible.minX {
+            adjusted.origin.x = visible.minX
+        }
+        if adjusted.maxX > visible.maxX {
+            adjusted.origin.x = max(visible.minX, visible.maxX - adjusted.width)
+        }
+        if adjusted.minY < visible.minY {
+            adjusted.origin.y = visible.minY
+        }
+        if adjusted.maxY > visible.maxY {
+            adjusted.origin.y = max(visible.minY, visible.maxY - adjusted.height)
+        }
+        if adjusted != currentFrame {
+            window.setFrame(adjusted, display: true)
+        }
+    }
+    
+    func syncWebViewport() {
+        window.contentView?.layoutSubtreeIfNeeded()
+        webView.needsLayout = true
+        webView.evaluateJavaScript("window.dispatchEvent(new Event('resize'));", completionHandler: nil)
+    }
+    
+    func windowDidResize(_ notification: Notification) {
+        window.contentView?.layoutSubtreeIfNeeded()
+    }
+    
+    func windowDidEndLiveResize(_ notification: Notification) {
+        syncWebViewport()
+    }
+    
+    func windowDidMove(_ notification: Notification) {
+        window.contentView?.layoutSubtreeIfNeeded()
+    }
+    
+    func windowDidChangeScreen(_ notification: Notification) {
+        syncWebViewport()
+    }
+    
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        syncWebViewport()
+    }
+    
+    func windowDidExitFullScreen(_ notification: Notification) {
+        syncWebViewport()
     }
     
     func resolveCatalogCount() -> String {
@@ -297,7 +407,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
             }
           </style>
         </head>
-        <body>
+        <body data-window-drag="true">
           <div class="logo-box">
             <div class="spinner"></div>
           </div>
@@ -442,7 +552,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
     
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         if let dict = message.body as? [String: Any], let action = dict["action"] as? String {
-            if action == "closeQuickMenu" || action == "quitGame" {
+            if action == "startWindowDrag" {
+                DispatchQueue.main.async {
+                    if let ev = self.lastLeftMouseDownEvent ?? NSApp.currentEvent, ev.type == .leftMouseDown {
+                        self.window.performDrag(with: ev)
+                    }
+                }
+            } else if action == "toggleWindowZoom" {
+                DispatchQueue.main.async {
+                    self.window.zoom(nil)
+                }
+            } else if action == "closeQuickMenu" || action == "quitGame" {
                 DispatchQueue.main.async {
                     self.window.level = .normal
                     NSApp.activate(ignoringOtherApps: true)

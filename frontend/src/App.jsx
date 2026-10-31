@@ -343,7 +343,7 @@ export default function App() {
     : null;
 
   return (
-    <div className="min-h-screen bg-[#080c14] text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-black overflow-x-hidden">
+    <div className="min-h-dvh w-full bg-[#080c14] text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-black overflow-x-clip">
       
       {/* Toast Notification */}
       {notification && (
@@ -413,7 +413,7 @@ export default function App() {
       ) : (
         <>
           {/* Main Container */}
-          <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-8">
+          <main className="flex-1 max-w-[1600px] w-full mx-auto px-3 sm:px-5 lg:px-8 py-4 sm:py-6 lg:py-8 min-w-0">
         
         {/* VIEW 1: STOREFRONT */}
         {currentView === 'store' && (

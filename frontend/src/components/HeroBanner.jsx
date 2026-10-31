@@ -64,10 +64,10 @@ export default function HeroBanner({ game, onSelectGame, onQuickDownload }) {
       </div>
 
       {/* Content */}
-      <div className="relative z-10 p-6 md:p-10 lg:p-12 flex flex-col md:flex-row items-center justify-between gap-8">
-        <div className="max-w-2xl">
+      <div className="relative z-10 p-5 sm:p-7 md:p-9 lg:p-11 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 lg:gap-8">
+        <div className="max-w-2xl min-w-0">
           {/* Featured Tag & Platform */}
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 text-xs font-bold tracking-wide uppercase">
               <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
               Featured Vault Classic
@@ -83,12 +83,12 @@ export default function HeroBanner({ game, onSelectGame, onQuickDownload }) {
           </div>
 
           {/* Title */}
-          <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl font-black text-white tracking-wide mb-3 leading-tight drop-shadow-md">
+          <h1 className="font-display text-2xl sm:text-3xl lg:text-5xl font-black text-white tracking-wide mb-3 leading-tight drop-shadow-md break-words">
             {game.title}
           </h1>
 
           {/* Rating & Genre */}
-          <div className="flex items-center gap-4 mb-4 text-sm">
+          <div className="flex flex-wrap items-center gap-2.5 sm:gap-4 mb-3 sm:mb-4 text-sm">
             {Number(game.rating) > 0 && (
               <div className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-lg text-amber-400 font-bold">
                 <Star className="w-4 h-4 fill-amber-400 text-amber-400" />

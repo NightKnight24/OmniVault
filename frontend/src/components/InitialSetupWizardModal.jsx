@@ -315,11 +315,11 @@ export default function InitialSetupWizardModal({ isOpen, onClose, onFinish, ini
   const readyBiosCount = biosItems.filter(b => b.present).length;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4 select-none">
-      <div className="relative w-full max-w-4xl h-[88vh] max-h-[820px] bg-slate-950/95 border border-cyan-500/30 rounded-3xl shadow-[0_0_50px_rgba(0,210,255,0.25)] flex flex-col overflow-hidden text-slate-200">
+    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-2.5 sm:p-4 select-none">
+      <div className="relative w-full max-w-4xl h-[calc(100dvh-1.5rem)] sm:h-[88dvh] max-h-[820px] bg-slate-950/95 border border-cyan-500/30 rounded-3xl shadow-[0_0_50px_rgba(0,210,255,0.25)] flex flex-col overflow-hidden text-slate-200">
         
         {/* TOP STATUS BAR & HEADER */}
-        <div className="px-8 py-5 border-b border-white/10 bg-slate-900/60 flex items-center justify-between">
+        <div className="px-4 sm:px-8 py-3.5 sm:py-5 border-b border-white/10 bg-slate-900/60 flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3">
             <img src="/vault.svg" alt="OmniVault" className="w-9 h-9 object-contain drop-shadow-[0_0_12px_#00f0ff]" />
             <div>

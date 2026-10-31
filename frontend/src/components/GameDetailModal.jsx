@@ -418,13 +418,13 @@ export default function GameDetailModal({
       id="gameDetailModal"
       closedby="any"
       aria-labelledby="gameModalTitle"
-      className="m-auto bg-transparent p-0 max-w-4xl w-[94vw] rounded-3xl outline-none shadow-2xl backdrop:bg-black/80 backdrop:backdrop-blur-md"
+      className="m-auto bg-transparent p-0 max-w-4xl w-[calc(100vw-1.5rem)] max-h-[calc(100dvh-1.5rem)] rounded-3xl outline-none shadow-2xl backdrop:bg-black/80 backdrop:backdrop-blur-md"
     >
-      <div className="relative bg-[#0d1322] border border-white/15 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
+      <div className="relative bg-[#0d1322] border border-white/15 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[calc(100dvh-1.5rem)]">
         
         {/* Header Bar with Navigation Tabs and Close Button */}
-        <div className="flex items-center justify-between border-b border-white/10 px-6 py-3 bg-slate-950/90 z-20">
-          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+        <div className="flex items-center justify-between gap-2 border-b border-white/10 px-4 sm:px-6 py-3 bg-slate-950/90 z-20 shrink-0">
+          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none min-w-0">
             <button
               onClick={() => setModalTab('overview')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
@@ -529,7 +529,7 @@ export default function GameDetailModal({
               <div className="relative bg-slate-950 border-b border-white/10">
                 
                 {/* Media Switcher */}
-                <div className="absolute top-4 left-4 z-10 flex items-center gap-1.5 p-1 rounded-xl bg-black/70 backdrop-blur-md border border-white/15">
+                <div className="absolute top-3 left-3 max-w-[calc(100%-1.5rem)] z-10 flex flex-wrap items-center gap-1 p-1 rounded-xl bg-black/75 backdrop-blur-md border border-white/15">
                   <button
                     onClick={() => setActiveMediaTab('trailer')}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${

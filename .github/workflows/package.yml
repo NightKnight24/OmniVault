@@ -38,7 +38,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=1.0.1
+            type=raw,value=1.0.2
             type=raw,value=latest
 
       - name: Build and push Docker image to GitHub Packages

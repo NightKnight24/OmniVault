@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Metadata%20Catalog-67%2C594%20Titles-cyan?style=flat-square" alt="Catalog" />
   <img src="https://img.shields.io/badge/Consoles-35%20Systems-purple?style=flat-square" alt="Consoles" />
   <a href="https://github.com/NightKnight24/OmniVault/releases"><img src="https://img.shields.io/github/v/release/NightKnight24/OmniVault?label=Release&style=flat-square&color=emerald" alt="Release" /></a>
-  <a href="https://github.com/users/NightKnight24/packages?repo_name=OmniVault"><img src="https://img.shields.io/badge/GHCR-Package%20v1.0.1-2496ED?style=flat-square&logo=docker&logoColor=white" alt="GitHub Package" /></a>
+  <a href="https://github.com/users/NightKnight24/packages?repo_name=OmniVault"><img src="https://img.shields.io/badge/GHCR-Package%20v1.0.2-2496ED?style=flat-square&logo=docker&logoColor=white" alt="GitHub Package" /></a>
   <a href="https://github.com/NightKnight24/homebrew-omnivault"><img src="https://img.shields.io/badge/Homebrew-Tap-FBB040?style=flat-square&logo=homebrew&logoColor=black" alt="Homebrew Tap" /></a>
   <a href="https://github.com/NightKnight24/OmniVault/issues"><img src="https://img.shields.io/github/issues/NightKnight24/OmniVault?style=flat-square&color=blue" alt="Issues" /></a>
   <a href="https://github.com/NightKnight24/OmniVault/discussions"><img src="https://img.shields.io/badge/Discussions-Join%20Community-purple?style=flat-square" alt="Discussions" /></a>
@@ -45,7 +45,7 @@ brew install --cask omnivault
 
 ### Option B: Download Pre-compiled App (Zero Setup)
 Download the standalone native macOS Apple Silicon app directly from **[GitHub Releases](https://github.com/NightKnight24/OmniVault/releases/latest)**:
-1. Download **`OmniVault-v1.0.1-macOS-arm64.zip`**.
+1. Download **`OmniVault-v1.0.2-macOS-arm64.zip`**.
 2. Unzip and drag `OmniVault.app` to your `/Applications` folder.
 3. Double-click to launch!
 

@@ -280,7 +280,7 @@ export default function KodiBigPictureView({
 
   return (
     <div 
-      className="relative w-full h-screen overflow-hidden flex flex-col select-none transition-colors duration-700"
+      className="relative w-full flex-1 min-h-0 overflow-x-hidden overflow-y-auto flex flex-col select-none transition-colors duration-700"
       style={{
         background: `radial-gradient(circle at 65% 30%, ${currentAmbiance.glow.replace('0.5', '0.25')}, #05070f 65%)`
       }}
@@ -297,26 +297,29 @@ export default function KodiBigPictureView({
       <div className="absolute inset-0 z-0 bg-gradient-to-r from-[#05070f] via-[#05070f]/60 to-transparent" />
 
       {/* TOP STATUS BAR (Kodi / XBMC 10-Foot Style) */}
-      <div className="relative z-10 px-8 py-4 flex items-center justify-between border-b border-white/10 bg-black/50 backdrop-blur-md gap-4">
+      <div
+        data-window-drag="true"
+        className="relative z-10 px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between border-b border-white/10 bg-black/50 backdrop-blur-md gap-3"
+      >
         
         {/* Brand Icon & Name */}
         <div className="flex items-center gap-3 shrink-0">
-          <img src="/vault.svg" alt="OmniVault Logo" className="w-9 h-9 object-contain drop-shadow-[0_0_12px_#00f0ff]" />
+          <img src="/vault.svg" alt="OmniVault Logo" className="w-8 h-8 sm:w-9 sm:h-9 object-contain drop-shadow-[0_0_12px_#00f0ff]" />
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-display font-black text-xl text-white tracking-wider">OMNIVAULT</span>
-              <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800">
+              <span className="font-display font-black text-lg sm:text-xl text-white tracking-wider">OMNIVAULT</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 hidden sm:inline">
                 10-Foot Cinema
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 font-mono">
-              Living Room Edition • {(totalGames || 15789).toLocaleString()} Titles
+            <p className="text-[11px] text-slate-400 font-mono hidden md:block">
+              Living Room Edition • {(totalGames || 67594).toLocaleString()} Titles
             </p>
           </div>
         </div>
 
         {/* Center Live Storefront Search Bar */}
-        <div className="flex-1 max-w-md mx-4">
+        <div className="order-last w-full md:order-none md:w-auto md:flex-1 max-w-md">
           <div className="flex items-center gap-2 bg-slate-900/90 border border-white/15 rounded-2xl px-3.5 py-2 shadow-inner focus-within:border-cyan-400 focus-within:ring-2 focus-within:ring-cyan-500/30 transition-all">
             <Search className="w-4 h-4 text-cyan-400 shrink-0" />
             <input 
@@ -343,7 +346,7 @@ export default function KodiBigPictureView({
         </div>
 
         {/* Right Info: Controller Status, Scraper, Clock & Mode Toggle */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-auto md:ml-0">
           
           {/* Online Scraper Button */}
           {onOpenScraper && (
@@ -393,10 +396,10 @@ export default function KodiBigPictureView({
       </div>
 
       {/* MAIN 10-FOOT INTERFACE BODY */}
-      <div className="relative z-10 flex-1 flex overflow-hidden">
+      <div className="relative z-10 flex-1 min-h-0 flex flex-col md:flex-row overflow-x-hidden">
         
         {/* LEFT BLADE CATEGORY RAIL (Kodi Estuary Style) */}
-        <div className="w-64 bg-slate-950/80 border-r border-white/10 backdrop-blur-xl p-5 flex flex-col justify-between overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+        <div className="w-full md:w-52 lg:w-64 shrink-0 bg-slate-950/80 border-b md:border-b-0 md:border-r border-white/10 backdrop-blur-xl p-3 sm:p-4 lg:p-5 flex flex-col justify-between overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
           
           <div className="space-y-1.5">
             <div className="text-[10px] uppercase font-bold tracking-widest text-slate-500 px-3 mb-2 font-mono">
@@ -463,15 +466,15 @@ export default function KodiBigPictureView({
         </div>
 
         {/* RIGHT CINEMATIC HERO & COVERFLOW STAGE */}
-        <div className="flex-1 flex flex-col justify-between p-8 overflow-hidden">
+        <div className="flex-1 min-w-0 flex flex-col justify-between p-4 sm:p-6 lg:p-8 gap-6 overflow-x-hidden">
           
           {/* CINEMATIC HERO STAGE (Focused Game Showcase) */}
           {focusedGame ? (
-            <div className="flex items-start gap-8 max-w-5xl animate-in fade-in duration-300">
+            <div className="flex flex-col sm:flex-row items-start gap-4 sm:gap-6 lg:gap-8 max-w-5xl min-w-0 animate-in fade-in duration-300">
               
               {/* 3D Box Art Artwork */}
               <div 
-                className="w-44 h-60 rounded-3xl bg-black border-2 overflow-hidden shadow-2xl shrink-0 transition-all duration-300 transform group"
+                className="w-28 h-40 sm:w-36 sm:h-52 lg:w-44 lg:h-60 rounded-3xl bg-black border-2 overflow-hidden shadow-2xl shrink-0 transition-all duration-300 transform group"
                 style={{ borderColor: currentAmbiance.accent, boxShadow: `0 0 35px ${currentAmbiance.glow}` }}
               >
                 {focusedGame.box_art_2d ? (
@@ -483,14 +486,14 @@ export default function KodiBigPictureView({
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center bg-slate-900">
-                    <Gamepad2 className="w-16 h-16 text-slate-600" />
+                    <Gamepad2 className="w-12 h-12 sm:w-16 sm:h-16 text-slate-600" />
                   </div>
                 )}
               </div>
 
               {/* Title & Metadata Details */}
-              <div className="flex-1 space-y-3">
-                <div className="flex items-center gap-2.5">
+              <div className="flex-1 min-w-0 space-y-2.5 sm:space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
                   <span 
                     className="px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider font-mono shadow-md text-white"
                     style={{ backgroundColor: currentAmbiance.primary }}
@@ -520,16 +523,16 @@ export default function KodiBigPictureView({
                   )}
                 </div>
 
-                <h1 className="font-display font-black text-3xl md:text-5xl text-white tracking-tight leading-none drop-shadow-lg">
+                <h1 className="font-display font-black text-2xl sm:text-3xl lg:text-5xl text-white tracking-tight leading-tight drop-shadow-lg break-words">
                   {focusedGame.title}
                 </h1>
 
-                <p className="text-sm text-slate-300 max-w-2xl line-clamp-3 leading-relaxed">
+                <p className="text-xs sm:text-sm text-slate-300 max-w-2xl line-clamp-3 leading-relaxed">
                   {focusedGame.description || 'Preserved classic video game ready for instant in-app emulation, live AI translation, and cheat engineering.'}
                 </p>
 
                 {/* Direct Action Buttons: Play if installed, Download if Storefront */}
-                <div className="flex items-center gap-3 pt-2">
+                <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 pt-1 sm:pt-2">
                   {isFocusedInstalled ? (
                     <button
                       onClick={() => {

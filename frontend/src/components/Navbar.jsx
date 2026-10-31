@@ -55,28 +55,34 @@ export default function Navbar({
   }, [isToolsOpen]);
 
   return (
-    <header className="sticky top-0 z-30 bg-[#080c14]/95 backdrop-blur-md border-b border-white/10 pl-20 pr-4 lg:pr-8 py-3 transition-all select-none">
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 sm:gap-4">
+    <header
+      data-window-drag="true"
+      className="sticky top-0 z-30 bg-[#080c14]/95 backdrop-blur-md border-b border-white/10 px-3 sm:px-5 lg:px-8 py-2.5 transition-all select-none"
+    >
+      <div
+        data-window-drag="true"
+        className="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-2 sm:gap-3"
+      >
         
         {/* Brand / Logo */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2.5 shrink-0">
           <div 
             onClick={() => handleNav('store')}
-            className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-violet-600/30 border border-cyan-400/40 p-1.5 flex items-center justify-center shadow-glow-cyan cursor-pointer hover:scale-105 transition-transform shrink-0"
+            className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-violet-600/30 border border-cyan-400/40 p-1.5 flex items-center justify-center shadow-glow-cyan cursor-pointer hover:scale-105 transition-transform shrink-0"
           >
             <img src="/vault.svg" alt="OmniVault" className="w-full h-full object-contain filter drop-shadow-[0_0_6px_rgba(0,210,255,0.8)]" />
           </div>
-          <div className="cursor-pointer hidden sm:block" onClick={() => handleNav('store')}>
+          <div className="cursor-pointer hidden md:block" onClick={() => handleNav('store')}>
             <div className="flex items-center gap-2">
-              <span className="font-display font-bold text-xl tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-sky-200 to-violet-400">
+              <span className="font-display font-bold text-lg lg:text-xl tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-sky-200 to-violet-400">
                 OMNIVAULT
               </span>
               <span className="text-[10px] uppercase font-semibold tracking-widest px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/60">
                 Store
               </span>
             </div>
-            <p className="text-[11px] text-slate-400">
-              {totalGames ? totalGames.toLocaleString() : '69,222'} Verified ROMs & AI Copilot
+            <p className="text-[11px] text-slate-400 hidden xl:block">
+              {totalGames ? totalGames.toLocaleString() : '67,594'} Verified ROMs & AI Copilot
             </p>
           </div>
         </div>
@@ -85,26 +91,28 @@ export default function Navbar({
         <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-900 border border-white/10 shrink-0">
           <button
             onClick={() => handleNav('store')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            title="Storefront Catalog"
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               currentView === 'store'
                 ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-black shadow-glow-cyan'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
           >
             <ShoppingBag className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">Storefront</span>
+            <span className="hidden lg:inline">Storefront</span>
           </button>
 
           <button
             onClick={() => handleNav('downloaded')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            title="Downloaded Games"
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               currentView === 'downloaded'
                 ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-black shadow-glow-cyan'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
           >
             <HardDrive className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">Downloaded</span>
+            <span className="hidden lg:inline">Downloaded</span>
             {installedCount > 0 && (
               <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
                 currentView === 'downloaded' ? 'bg-black/30 text-black font-extrabold' : 'bg-slate-800 text-cyan-400'
@@ -116,14 +124,15 @@ export default function Navbar({
 
           <button
             onClick={() => handleNav('favorites')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            title="Saved Favorites"
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               currentView === 'favorites'
                 ? 'bg-gradient-to-r from-rose-500 to-pink-600 text-white shadow-lg'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
           >
             <Heart className={`w-3.5 h-3.5 ${currentView === 'favorites' ? 'fill-white' : 'text-rose-400'}`} />
-            <span className="hidden md:inline">Favorites</span>
+            <span className="hidden lg:inline">Favorites</span>
             {favoritesCount > 0 && (
               <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
                 currentView === 'favorites' ? 'bg-white/30 text-white font-extrabold' : 'bg-slate-800 text-rose-400'
@@ -134,9 +143,9 @@ export default function Navbar({
           </button>
         </div>
 
-        {/* Search Bar */}
+        {/* Search Bar — inline from md+, cleanly wraps full-width below md */}
         {currentView !== 'downloaded' && (
-          <div className="flex-1 min-w-[130px] max-w-xs relative hidden sm:block">
+          <div className="order-last w-full md:order-none md:w-auto md:flex-1 md:min-w-[150px] md:max-w-xs relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
@@ -157,7 +166,7 @@ export default function Navbar({
         )}
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto md:ml-0">
           
           {/* Chiptune Audio Toggle */}
           <button
@@ -175,28 +184,28 @@ export default function Navbar({
           {/* OmniAI Assistant Button */}
           <button
             onClick={onOpenAI}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500/20 to-sky-500/20 hover:from-cyan-500/30 hover:to-sky-500/30 border border-cyan-500/40 text-cyan-300 text-xs font-bold transition-all hover:scale-[1.02] cursor-pointer shadow-sm group shrink-0"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500/20 to-sky-500/20 hover:from-cyan-500/30 hover:to-sky-500/30 border border-cyan-500/40 text-cyan-300 text-xs font-bold transition-all hover:scale-[1.02] cursor-pointer shadow-sm group shrink-0"
             title="Ask OmniAI for recommendations, cheats & setup"
           >
             <Bot className="w-3.5 h-3.5 text-cyan-400 group-hover:animate-pulse" />
-            <span className="hidden lg:inline">OmniAI</span>
+            <span className="hidden xl:inline">OmniAI</span>
             <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
           </button>
 
           {/* Online Scraper Button */}
           <button
             onClick={onOpenScraper}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-600/20 hover:bg-violet-600/40 border border-violet-500/40 text-violet-300 text-xs font-semibold transition-all hover:scale-[1.02] cursor-pointer shrink-0"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-violet-600/20 hover:bg-violet-600/40 border border-violet-500/40 text-violet-300 text-xs font-semibold transition-all hover:scale-[1.02] cursor-pointer shrink-0"
             title="Scrape Archive.org & online ROM sources for any game"
           >
             <Compass className="w-3.5 h-3.5 text-violet-400" />
-            <span className="hidden lg:inline">Scraper</span>
+            <span className="hidden xl:inline">Scraper</span>
           </button>
 
           {/* Kodi / 10-Foot Living Room Cinema Toggle */}
           <button
             onClick={onToggleKodiMode}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all hover:scale-[1.02] cursor-pointer shadow-sm shrink-0 ${
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-bold transition-all hover:scale-[1.02] cursor-pointer shadow-sm shrink-0 ${
               isKodiMode
                 ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-black border-cyan-400 shadow-glow-cyan'
                 : 'bg-indigo-950/40 hover:bg-indigo-900/60 border-indigo-500/30 text-indigo-300'
@@ -204,14 +213,14 @@ export default function Navbar({
             title="Toggle Kodi / XBMC 10-Foot Living Room Interface"
           >
             <Tv className="w-3.5 h-3.5" />
-            <span className="hidden xl:inline">{isKodiMode ? 'Cinema Mode' : 'Kodi Mode'}</span>
+            <span className="hidden 2xl:inline">{isKodiMode ? 'Cinema Mode' : 'Kodi Mode'}</span>
           </button>
 
           {/* Vault Tools & Labs Dropdown Menu */}
           <div className="relative shrink-0" ref={toolsMenuRef}>
             <button
               onClick={() => setIsToolsOpen(!isToolsOpen)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all hover:scale-[1.02] cursor-pointer shadow-sm ${
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all hover:scale-[1.02] cursor-pointer shadow-sm ${
                 isToolsOpen
                   ? 'bg-cyan-500 text-black border-cyan-400 font-bold shadow-glow-cyan'
                   : 'bg-slate-800/90 hover:bg-slate-700/90 border-slate-700 text-slate-200'
@@ -225,7 +234,7 @@ export default function Navbar({
 
             {/* Dropdown Menu Popover */}
             {isToolsOpen && (
-              <div className="absolute right-0 top-full mt-2 w-72 rounded-2xl bg-[#0c1424] border border-white/15 shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150 backdrop-blur-xl">
+              <div className="absolute right-0 top-full mt-2 w-72 max-w-[calc(100vw-1.5rem)] max-h-[calc(100dvh-4.5rem)] overflow-y-auto rounded-2xl bg-[#0c1424] border border-white/15 shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150 backdrop-blur-xl">
                 <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-white/10 mb-1 flex items-center justify-between">
                   <span>Vault Tools & Hubs</span>
                   <span className="text-cyan-400 font-mono">8 tools</span>

@@ -403,21 +403,24 @@ export default function OmniPlayerModal({ game, onClose, onOpenSettings, onOpenC
       className="fixed inset-0 z-50 flex flex-col bg-black/95 backdrop-blur-md text-white select-none overflow-hidden"
     >
       {/* Top Bar Header */}
-      <div className="flex items-center justify-between px-6 py-3 bg-zinc-950/80 border-b border-zinc-800">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+      <div
+        data-window-drag="true"
+        className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-2.5 bg-zinc-950/80 border-b border-zinc-800 shrink-0"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
             <Gamepad2 className="w-5 h-5" />
           </div>
-          <div>
-            <h2 className="text-base font-bold tracking-tight text-zinc-100 flex items-center gap-2">
-              {game.title}
-              <span className="px-2 py-0.5 text-xs rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">
+          <div className="min-w-0">
+            <h2 className="text-sm sm:text-base font-bold tracking-tight text-zinc-100 flex items-center gap-2 truncate">
+              <span className="truncate">{game.title}</span>
+              <span className="px-2 py-0.5 text-xs rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700 shrink-0">
                 {platform}
               </span>
             </h2>
             <div className="flex items-center gap-2 text-xs text-zinc-400">
-              <span className="flex items-center gap-1 text-emerald-400 font-medium">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="flex items-center gap-1 text-emerald-400 font-medium truncate">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
                 {activeCoreName || 'OmniCore Engine'}
               </span>
               <span>•</span>
@@ -427,7 +430,7 @@ export default function OmniPlayerModal({ game, onClose, onOpenSettings, onOpenC
         </div>
 
         {/* Core Switcher & Actions */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 ml-auto">
           {!isNativePlatform && systemInfo.nativeId && (
             <button
               onClick={handleLaunchNative}
@@ -523,11 +526,11 @@ export default function OmniPlayerModal({ game, onClose, onOpenSettings, onOpenC
       </div>
 
       {/* Main Viewport */}
-      <div className="relative flex-1 flex items-center justify-center p-4 bg-gradient-to-b from-zinc-950 to-black overflow-hidden">
+      <div className={`relative flex-1 min-h-0 flex items-center justify-center p-3 sm:p-4 bg-gradient-to-b from-zinc-950 to-black ${isNativePlatform ? 'overflow-y-auto' : 'overflow-hidden'}`}>
         
         {/* NATIVE CONSOLE HARDWARE SCREEN */}
         {isNativePlatform ? (
-          <div className="relative z-10 max-w-xl w-full p-8 rounded-3xl bg-[#0c1220]/90 border border-white/15 backdrop-blur-xl shadow-2xl flex flex-col items-center text-center animate-in fade-in duration-300">
+          <div className="relative z-10 my-auto max-w-xl w-full p-5 sm:p-8 rounded-3xl bg-[#0c1220]/90 border border-white/15 backdrop-blur-xl shadow-2xl flex flex-col items-center text-center animate-in fade-in duration-300">
             {/* Box Art */}
             <div className="relative mb-5">
               <div className="w-28 h-36 rounded-2xl bg-black border border-white/20 overflow-hidden shadow-2xl mx-auto flex items-center justify-center">
@@ -764,10 +767,10 @@ export default function OmniPlayerModal({ game, onClose, onOpenSettings, onOpenC
             )}
 
             {/* Canvas Display */}
-            <div className="relative max-w-full max-h-full flex items-center justify-center shadow-2xl rounded-lg overflow-hidden border border-zinc-800/60 bg-black">
+            <div className="relative w-full h-full max-w-full max-h-full flex items-center justify-center shadow-2xl rounded-lg overflow-hidden border border-zinc-800/60 bg-black min-h-0 min-w-0">
               <canvas
                 ref={canvasRef}
-                className={`max-w-full max-h-[82vh] object-contain transition-all ${
+                className={`w-full h-full max-w-full max-h-full object-contain transition-all ${
                   crtFilter ? 'filter brightness-105 contrast-110' : ''
                 }`}
                 style={{ imageRendering: 'pixelated' }}
@@ -877,9 +880,9 @@ export default function OmniPlayerModal({ game, onClose, onOpenSettings, onOpenC
       </div>
 
       {/* Floating Bottom Control Bar */}
-      <div className="flex items-center justify-between px-6 py-3 bg-zinc-950/90 border-t border-zinc-800">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-2.5 bg-zinc-950/90 border-t border-zinc-800 shrink-0">
         {/* Playback Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           <button
             onClick={handleTogglePause}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-medium text-zinc-200 transition-colors"

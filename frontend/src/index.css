@@ -3,9 +3,30 @@
 @tailwind utilities;
 
 @layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+    padding: 0;
+    background-color: #080c14;
+    overflow-x: clip;
+  }
+
   * {
     border-color: rgba(255, 255, 255, 0.08);
+    box-sizing: border-box;
   }
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Modern Web Guidance Compliance for Modal Dialogs */

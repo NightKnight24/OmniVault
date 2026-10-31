@@ -71,7 +71,15 @@ export default function PlatformFilter({
   useEffect(() => {
     checkScroll();
     window.addEventListener('resize', checkScroll);
-    return () => window.removeEventListener('resize', checkScroll);
+    let observer = null;
+    if (scrollRef.current && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => checkScroll());
+      observer.observe(scrollRef.current);
+    }
+    return () => {
+      window.removeEventListener('resize', checkScroll);
+      if (observer) observer.disconnect();
+    };
   }, [platformsData, selectedFamily]);
 
   const handleScroll = (direction) => {
