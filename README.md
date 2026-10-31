@@ -44,7 +44,7 @@ brew install --cask omnivault
 
 ### Option B: Download Pre-compiled App (Zero Setup)
 Download the standalone native macOS Apple Silicon app directly from **[GitHub Releases](https://github.com/NightKnight24/OmniVault/releases/latest)**:
-1. Download **`OmniVault-v1.0.0-macOS-arm64.zip`**.
+1. Download **`OmniVault-v1.0.1-macOS-arm64.zip`**.
 2. Unzip and drag `OmniVault.app` to your `/Applications` folder.
 3. Double-click to launch!
 
