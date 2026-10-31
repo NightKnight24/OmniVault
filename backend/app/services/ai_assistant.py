@@ -1,8 +1,12 @@
 import re
 import os
+import sys
+import ssl
 import sqlite3
 import json
 import time
+import threading
+import urllib.request
 from html import unescape
 from typing import Dict, Any, List, Optional
 from pathlib import Path
@@ -10,6 +14,10 @@ try:
     import httpx
 except ImportError:
     httpx = None
+try:
+    import certifi
+except ImportError:
+    certifi = None
 
 from ..database import get_db_connection, row_to_game_dict, DB_DIR, BUNDLE_DATA_DIR
 
@@ -45,7 +53,8 @@ def start_model_download_background():
             _DOWNLOAD_STATE["status"] = "downloading"
             _DOWNLOAD_STATE["error"] = None
             req = urllib.request.Request(url, headers={"User-Agent": "OmniVault/1.0"})
-            with urllib.request.urlopen(req, timeout=30) as resp, open(temp_path, "wb") as f_out:
+            ssl_ctx = ssl.create_default_context(cafile=certifi.where()) if certifi else None
+            with urllib.request.urlopen(req, timeout=30, context=ssl_ctx) as resp, open(temp_path, "wb") as f_out:
                 total = int(resp.headers.get("content-length", 491782144))
                 _DOWNLOAD_STATE["total_mb"] = round(total / (1024 * 1024), 1)
                 downloaded = 0
@@ -67,9 +76,6 @@ def start_model_download_background():
             if temp_path.exists():
                 temp_path.unlink()
 
-    import threading
-    import urllib.request
-    import sys
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
 

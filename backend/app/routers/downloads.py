@@ -77,6 +77,12 @@ def list_installed_games():
     download_rows = cursor.fetchall()
     
     installed_map: Dict[str, Dict[str, Any]] = {}
+    valid_exts = {
+        ".zip", ".7z", ".sfc", ".smc", ".nes", ".z64", ".n64", ".v64",
+        ".gba", ".gb", ".gbc", ".nds", ".dsi", ".iso", ".chd", ".rvz", ".cso", ".gcm",
+        ".pce", ".sms", ".gg", ".a26", ".a78", ".md", ".gen", ".bin", ".cue", ".pbp",
+        ".3ds", ".cia", ".vpk", ".pkg", ".nsp", ".xci", ".wux", ".wud", ".rpx", ".xbe", ".xex"
+    }
     
     for r in download_rows:
         path = r["destination_path"]
@@ -115,12 +121,6 @@ def list_installed_games():
     # 2. Also scan configured ROMs subdirectories directly for any present ROMs
     from ..services.storage_service import get_roms_dir
     roms_dir = get_roms_dir()
-    valid_exts = {
-        ".zip", ".7z", ".sfc", ".smc", ".nes", ".z64", ".n64", ".v64",
-        ".gba", ".gb", ".gbc", ".nds", ".dsi", ".iso", ".chd", ".rvz", ".cso", ".gcm",
-        ".pce", ".sms", ".gg", ".a26", ".a78", ".md", ".gen", ".bin", ".cue", ".pbp",
-        ".3ds", ".cia", ".vpk", ".pkg", ".nsp", ".xci", ".wux", ".wud", ".rpx", ".xbe", ".xex"
-    }
     EXCLUDED_FOLDERS = {
         "BIOS", "EMULATORS", "CORES", "FIRMWARE", "KEYS",
         "PATCHES", "SAVESNAPSHOTS", "SAVES", "STATES",

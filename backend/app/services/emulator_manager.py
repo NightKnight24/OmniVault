@@ -238,6 +238,7 @@ SUPPORTED_EMULATORS: Dict[str, Dict[str, Any]] = {
         "install_method": "homebrew_or_direct",
         "cask_name": "ppsspp-emulator",
         "github_repo": "hrydgard/ppsspp",
+        "asset_pattern": "macos",
         "asset_pattern_win": "Windows",
         "config_type": "ini",
         "config_rel_path": "PPSSPP/ppsspp.ini",
@@ -253,7 +254,7 @@ SUPPORTED_EMULATORS: Dict[str, Dict[str, Any]] = {
         "description": "High-performance Sony PlayStation 1 emulator with Vulkan / D3D upscaling.",
         "install_method": "github_release",
         "github_repo": "stenzek/duckstation",
-        "asset_pattern": "macos",
+        "asset_pattern": "mac",
         "asset_pattern_win": "windows-x64",
         "config_type": "ini",
         "config_rel_path": "DuckStation/settings.ini",
@@ -391,15 +392,18 @@ class EmulatorManager:
                     except Exception:
                         pass
                 else:
+                    local_ver = "Installed"
                     plist = path / "Contents" / "Info.plist"
                     if plist.exists():
-                        try:
-                            cmd = ["/usr/bin/defaults", "read", str(plist), "CFBundleShortVersionString"]
-                            p = subprocess.run(cmd, capture_output=True, text=True, check=False)
-                            if p.returncode == 0 and p.stdout.strip():
-                                local_ver = p.stdout.strip()
-                        except Exception:
-                            pass
+                        for key_name in ("CFBundleShortVersionString", "CFBundleVersion"):
+                            try:
+                                cmd = ["/usr/bin/defaults", "read", str(plist), key_name]
+                                p = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                                if p.returncode == 0 and p.stdout.strip():
+                                    local_ver = p.stdout.strip()
+                                    break
+                            except Exception:
+                                pass
 
             statuses.append({
                 "id": emu_id,
@@ -575,11 +579,18 @@ class EmulatorManager:
         if emu.get("github_repo"):
             repo = emu["github_repo"]
             try:
-                async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                     api_url = f"https://api.github.com/repos/{repo}/releases/latest"
                     resp = await client.get(api_url, headers={"User-Agent": USER_AGENT})
+                    data = None
                     if resp.status_code == 200:
                         data = resp.json()
+                    else:
+                        rel_resp = await client.get(f"https://api.github.com/repos/{repo}/releases", headers={"User-Agent": USER_AGENT})
+                        if rel_resp.status_code == 200 and isinstance(rel_resp.json(), list) and rel_resp.json():
+                            data = rel_resp.json()[0]
+
+                    if data:
                         assets = data.get("assets", [])
                         pattern = emu.get("asset_pattern", "macos").lower()
                         matched_asset = None
@@ -603,12 +614,13 @@ class EmulatorManager:
                                     async for chunk in stream.aiter_bytes(chunk_size=65536):
                                         f.write(chunk)
 
-                            # Extract
+                            # Extract preserving macOS bundle symlinks, executable bits, and signatures
+                            self.emulators_dir.mkdir(parents=True, exist_ok=True)
                             if asset_name.endswith(".zip"):
-                                shutil.unpack_archive(temp_file, self.emulators_dir)
+                                subprocess.run(["/usr/bin/ditto", "-x", "-k", str(temp_file), str(self.emulators_dir)], capture_output=True, check=False)
+                            elif asset_name.endswith((".tar.xz", ".tar.gz", ".tgz")):
+                                subprocess.run(["/usr/bin/tar", "-xf", str(temp_file), "-C", str(self.emulators_dir)], capture_output=True, check=False)
                             elif asset_name.endswith(".dmg"):
-                                # Mount DMG and copy .app
-                                mount_p = Path("/Volumes/EmuMount")
                                 mount_cmd = ["/usr/bin/hdiutil", "attach", str(temp_file), "-nobrowse", "-readonly"]
                                 subprocess.run(mount_cmd, capture_output=True, check=False)
                                 for mounted in Path("/Volumes").iterdir():
@@ -617,7 +629,7 @@ class EmulatorManager:
                                             dest_app = self.emulators_dir / app.name
                                             if dest_app.exists():
                                                 shutil.rmtree(dest_app)
-                                            shutil.copytree(app, dest_app)
+                                            subprocess.run(["/usr/bin/ditto", str(app), str(dest_app)], capture_output=True, check=False)
                                         subprocess.run(["/usr/bin/hdiutil", "detach", str(mounted)], capture_output=True, check=False)
                                         break
                             elif asset_name.endswith(".7z"):
@@ -688,12 +700,18 @@ class EmulatorManager:
 
         effective_rom_path = self._resolve_active_mod_rom(game_path)
 
-        # Map platform to preferred native emulator
+        # Map platform to preferred native emulator (prefer installed engine first)
         target_emu_id = None
+        fallback_emu_id = None
         for emu_id, info in SUPPORTED_EMULATORS.items():
             if platform in info["consoles"]:
-                target_emu_id = emu_id
-                break
+                if fallback_emu_id is None:
+                    fallback_emu_id = emu_id
+                if self.get_emulator_path(emu_id) is not None:
+                    target_emu_id = emu_id
+                    break
+        if target_emu_id is None:
+            target_emu_id = fallback_emu_id
 
         if sys.platform == "win32":
             if not target_emu_id:
@@ -728,7 +746,7 @@ class EmulatorManager:
                 launch_args = ["-b", "-e", effective_rom_path]
             elif target_emu_id == "cemu":
                 launch_args = ["-f", "-g", effective_rom_path]
-            elif target_emu_id == "pcsx2":
+            elif target_emu_id in ("pcsx2", "duckstation"):
                 launch_args = ["-fullscreen", "-batch", effective_rom_path]
             elif target_emu_id == "rpcs3":
                 launch_args = ["--no-gui", effective_rom_path]
@@ -826,7 +844,7 @@ class EmulatorManager:
             launch_args = ["-b", "-e", effective_rom_path]
         elif target_emu_id == "cemu":
             launch_args = ["-f", "-g", effective_rom_path]
-        elif target_emu_id == "pcsx2":
+        elif target_emu_id in ("pcsx2", "duckstation"):
             launch_args = ["-fullscreen", "-batch", effective_rom_path]
         elif target_emu_id == "rpcs3":
             launch_args = ["--no-gui", effective_rom_path]
@@ -860,8 +878,10 @@ class EmulatorManager:
             }
             core_name = core_map.get(platform, "snes9x_libretro.dylib")
             core_candidates = [
+                self.emulators_dir / "cores" / core_name,
                 Path("/Volumes/ROMS/Emulators/cores") / core_name,
                 Path(os.path.expanduser("~/Library/Application Support/RetroArch/cores")) / core_name,
+                self.emulators_dir / "RetroArch.app/Contents/Resources/cores" / core_name,
                 Path("/Volumes/ROMS/Emulators/RetroArch.app/Contents/Resources/cores") / core_name
             ]
             matched_core = next((c for c in core_candidates if c.exists()), None)
@@ -959,7 +979,7 @@ class EmulatorManager:
 
             # Terminate any running standalone emulator process
             all_emu_procs = [
-                "RetroArch", "Dolphin", "Cemu", "PCSX2", "rpcs3", "RPCS3",
+                "RetroArch", "Dolphin", "Cemu", "PCSX2", "DuckStation", "rpcs3", "RPCS3",
                 "Ryujinx", "azahar", "Lime3DS", "Vita3K", "xemu", "xenia",
                 "shadPS4", "shadps4", "shadps4-bin", "melonDS", "PPSSPPSDL"
             ]
@@ -1156,9 +1176,8 @@ class EmulatorManager:
         except Exception:
             pass
 
-        # 1. Dolphin GFX & Interface Config (non-destructive INI update)
+        # 1. Dolphin GFX & Interface Config (non-destructive INI update in Application Support; never touch signed .app bundle)
         dolphin_dirs = [
-            self.emulators_dir / "Dolphin.app" / "Contents" / "Resources" / "User" / "Config",
             Path.home() / "Library" / "Application Support" / "Dolphin" / "Config"
         ]
         for d_dir in dolphin_dirs:
@@ -1225,10 +1244,9 @@ class EmulatorManager:
         except Exception:
             pass
 
-        # 5. Ryujinx Config (Switch) - already merges JSON dict
+        # 5. Ryujinx Config (Switch) - merges JSON dict in Application Support (never modify signed .app bundle)
         ryu_dirs = [
             Path.home() / "Library" / "Application Support" / "Ryujinx",
-            self.emulators_dir / "Ryujinx.app" / "Contents" / "Resources"
         ]
         for r_dir in ryu_dirs:
             if r_dir.exists():
@@ -1404,7 +1422,6 @@ input_menu_toggle_btn_label = "Guide/Home"
         # 1. DOLPHIN (GameCube & Wii)
         # -------------------------------------------------------------
         dolphin_dirs = [
-            self.emulators_dir / "Dolphin.app" / "Contents" / "Resources" / "User" / "Config",
             app_support / "Dolphin" / "Config"
         ]
         dolphin_target_dev = "SDL/0/GamePad"

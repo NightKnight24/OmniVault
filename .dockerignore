@@ -1,0 +1,13 @@
+.git
+.github
+.DS_Store
+frontend/node_modules
+frontend/dist
+backend/.venv
+backend/**/__pycache__
+backend/data/vault.db
+backend/data/vault.db-*
+backend/data/models/*.gguf
+*.zip
+*.dmg
+*.app

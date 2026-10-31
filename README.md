@@ -13,6 +13,7 @@
   <img src="https://img.shields.io/badge/Metadata%20Catalog-67%2C594%20Titles-cyan?style=flat-square" alt="Catalog" />
   <img src="https://img.shields.io/badge/Consoles-35%20Systems-purple?style=flat-square" alt="Consoles" />
   <a href="https://github.com/NightKnight24/OmniVault/releases"><img src="https://img.shields.io/github/v/release/NightKnight24/OmniVault?label=Release&style=flat-square&color=emerald" alt="Release" /></a>
+  <a href="https://github.com/users/NightKnight24/packages?repo_name=OmniVault"><img src="https://img.shields.io/badge/GHCR-Package%20v1.0.1-2496ED?style=flat-square&logo=docker&logoColor=white" alt="GitHub Package" /></a>
   <a href="https://github.com/NightKnight24/homebrew-omnivault"><img src="https://img.shields.io/badge/Homebrew-Tap-FBB040?style=flat-square&logo=homebrew&logoColor=black" alt="Homebrew Tap" /></a>
   <a href="https://github.com/NightKnight24/OmniVault/issues"><img src="https://img.shields.io/github/issues/NightKnight24/OmniVault?style=flat-square&color=blue" alt="Issues" /></a>
   <a href="https://github.com/NightKnight24/OmniVault/discussions"><img src="https://img.shields.io/badge/Discussions-Join%20Community-purple?style=flat-square" alt="Discussions" /></a>
@@ -26,7 +27,7 @@
 
 - **Massive 67k Metadata & Lore Catalog**: An indexed encyclopedia of 67,594 classic games across 35 systems (PlayStation 1–4, PSP, Vita, Nintendo NES to Switch, GameCube, Wii, Wii U, NDS, 3DS, Sega Genesis, Saturn, Dreamcast, Xbox, Arcade, etc.) with release years, developers, reviews, and gameplay synopses *(Zero copyrighted ROM files bundled)*.
 - **Physical Media in 3D**: Real-time 3D rendered cartridges, CD jewel cases, DVD boxes, and optical game discs with interactive 360° spin and packaging views.
-- **Standalone Emulator Integration**: Seamless 1-click launch routines for 13 standalone native emulators (Dolphin, RetroArch, PCSX2, RPCS3, Ryujinx, Cemu, Azahar/Lime3DS, Vita3K, xemu, melonDS, PPSSPP).
+- **Standalone Emulator Integration**: Seamless 1-click launch routines for 14 standalone native emulators (Dolphin, RetroArch, PCSX2, DuckStation, RPCS3, Ryujinx, Cemu, Azahar/Lime3DS, Vita3K, xemu, Xenia Canary, shadPS4, melonDS, PPSSPP).
 - **Bring Your Own Sources (BYOS)**: Ships 100% clean and legal. Connect Archive.org collections, Torznab/Prowlarr indexers, personal NAS servers, or community web directories.
 - **Embedded Local AI Copilot (OmniAI)**: Powered by local neural models (`Qwen2.5 0.5B`) running directly on Apple Silicon Metal GPUs. Answers gameplay questions, generates save file diffs, and provides walkthroughs without needing internet.
 - **Living-Room 10-Foot Kodi View**: Full controller-driven Big Picture mode with ambient glowing palettes, sound effects, and customizable themes.
@@ -48,7 +49,13 @@ Download the standalone native macOS Apple Silicon app directly from **[GitHub R
 2. Unzip and drag `OmniVault.app` to your `/Applications` folder.
 3. Double-click to launch!
 
-### Option C: Run From Source
+### Option C: Run via GitHub Packages (Docker / GHCR)
+Run the web storefront, 67,594-title catalog, and in-browser WebAssembly emulator anywhere:
+```bash
+docker run -d -p 19842:19842 --name omnivault ghcr.io/nightknight24/omnivault:latest
+```
+
+### Option D: Run From Source
 Requirements: macOS 13.0+, Python 3.11+ / `uv`.
 ```bash
 git clone https://github.com/NightKnight24/OmniVault.git

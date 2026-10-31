@@ -285,9 +285,10 @@ def get_cloud_status():
     sync_path = settings.get("cloud_sync_path") or str(DEFAULT_ICLOUD_PATH)
 
     total_snaps = 0
-    if SNAPSHOTS_DIR.exists():
+    snapshots_dir = get_snapshots_dir()
+    if snapshots_dir.exists():
         for ext in COMMON_SAVE_EXTS:
-            total_snaps += len(list(SNAPSHOTS_DIR.glob(f"**/*{ext}")))
+            total_snaps += len(list(snapshots_dir.glob(f"**/*{ext}")))
 
     return {
         "icloud_available": icloud_available,
@@ -302,10 +303,11 @@ def sync_cloud(payload: Dict[str, Any] = Body(...)):
     """Synchronizes real save snapshots to iCloud Drive or backup directory."""
     target_path_str = payload.get("sync_path") or str(DEFAULT_ICLOUD_PATH)
     target_path = Path(target_path_str)
+    snapshots_dir = get_snapshots_dir()
     
     try:
         target_path.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(SNAPSHOTS_DIR, target_path, dirs_exist_ok=True)
+        shutil.copytree(snapshots_dir, target_path, dirs_exist_ok=True)
         
         sync_time = time.strftime("%Y-%m-%d %H:%M:%S")
         conn = get_db_connection()
