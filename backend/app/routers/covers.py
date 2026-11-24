@@ -10,6 +10,12 @@ from fastapi import APIRouter, Query, HTTPException, Response, Request
 from fastapi.responses import FileResponse, Response
 from typing import Optional, Dict, Any
 from ..database import get_db_connection, DB_DIR
+from ..services.thegamesdb_service import (
+    is_thegamesdb_active,
+    lookup_game_thegamesdb,
+    MODERN_TGDB_FIRST_PLATFORMS,
+    TGDB_PLATFORM_MAP,
+)
 
 router = APIRouter(prefix="/api/covers", tags=["Covers"])
 
@@ -111,7 +117,7 @@ def clean_title_for_lookup(title: str) -> tuple:
 @router.get("")
 async def get_game_cover(title: str = Query(...), platform: Optional[str] = Query(None)) -> Dict[str, Any]:
     """
-    Resolves high-resolution official cover art via cached database and Wikipedia REST & OpenSearch APIs.
+    Resolves high-resolution official cover art via local cache, TheGamesDB API, and Wikipedia REST & OpenSearch APIs.
     """
     clean_t, clean_no_pub = clean_title_for_lookup(title)
     if not clean_t:
@@ -120,14 +126,26 @@ async def get_game_cover(title: str = Query(...), platform: Optional[str] = Quer
 
     cache_key = f"{clean_t.lower()}_{platform.lower() if platform else ''}"
 
-    # 1. Check local SQLite cache
+    # 1. Check local SQLite cache and close immediately before any HTTP requests
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT cover_url FROM cached_covers WHERE title_key = ?", (cache_key,))
     row = c.fetchone()
+    conn.close()
     if row and row["cover_url"]:
-        conn.close()
         return {"cover_url": row["cover_url"], "cached": True}
+
+    tgdb_active = is_thegamesdb_active()
+    cover_url = None
+
+    # 2. Modern platforms: query TheGamesDB first when active (better box art coverage)
+    if tgdb_active and platform in MODERN_TGDB_FIRST_PLATFORMS:
+        try:
+            tgdb = await lookup_game_thegamesdb(clean_t, platform)
+            if tgdb and tgdb.get("box_art_2d"):
+                cover_url = tgdb["box_art_2d"]
+        except Exception:
+            pass
 
     headers = {"User-Agent": WIKIPEDIA_USER_AGENT}
     candidates = [
@@ -140,62 +158,72 @@ async def get_game_cover(title: str = Query(...), platform: Optional[str] = Quer
         f"{clean_t} (arcade game)" if platform and platform.lower() == "arcade" else None,
     ]
 
-    cover_url = None
-    async with httpx.AsyncClient(verify=False, timeout=6.0) as client:
-        # Tier 1: Exact Wikipedia REST API page summaries
-        for cand in candidates:
-            if not cand:
-                continue
-            enc = urllib.parse.quote(cand.replace(" ", "_"))
-            api_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{enc}"
-            try:
-                resp = await client.get(api_url, headers=headers)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("type") == "disambiguation":
-                        continue
-                    img = data.get("thumbnail", {}).get("source") or data.get("originalimage", {}).get("source")
-                    if img and not img.lower().endswith(".svg"):
-                        cover_url = get_unscaled_cover_url(img)
-                        break
-            except Exception:
-                continue
-
-        # Tier 2: Wikipedia OpenSearch fallback
-        if not cover_url:
-            for search_term in [clean_t, clean_no_pub]:
-                if not search_term:
+    if not cover_url:
+        async with httpx.AsyncClient(verify=False, timeout=6.0) as client:
+            # Tier 1: Exact Wikipedia REST API page summaries
+            for cand in candidates:
+                if not cand:
                     continue
+                enc = urllib.parse.quote(cand.replace(" ", "_"))
+                api_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{enc}"
                 try:
-                    op_url = f"https://en.wikipedia.org/w/api.php?action=opensearch&search={urllib.parse.quote(search_term)}&limit=5&namespace=0&format=json"
-                    resp = await client.get(op_url, headers=headers)
+                    resp = await client.get(api_url, headers=headers)
                     if resp.status_code == 200:
-                        titles = resp.json()[1]
-                        for item_title in titles:
-                            enc = urllib.parse.quote(item_title.replace(" ", "_"))
-                            sr = await client.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{enc}", headers=headers)
-                            if sr.status_code == 200:
-                                data = sr.json()
-                                if data.get("type") == "disambiguation":
-                                    continue
-                                img = data.get("thumbnail", {}).get("source") or data.get("originalimage", {}).get("source")
-                                if img and not img.lower().endswith(".svg"):
-                                    cover_url = get_unscaled_cover_url(img)
-                                    break
-                    if cover_url:
-                        break
+                        data = resp.json()
+                        if data.get("type") == "disambiguation":
+                            continue
+                        img = data.get("thumbnail", {}).get("source") or data.get("originalimage", {}).get("source")
+                        if img and not img.lower().endswith(".svg"):
+                            cover_url = get_unscaled_cover_url(img)
+                            break
                 except Exception:
-                    pass
+                    continue
 
-    # 3. Store in SQLite cache
+            # Tier 2: Wikipedia OpenSearch fallback
+            if not cover_url:
+                for search_term in [clean_t, clean_no_pub]:
+                    if not search_term:
+                        continue
+                    try:
+                        op_url = f"https://en.wikipedia.org/w/api.php?action=opensearch&search={urllib.parse.quote(search_term)}&limit=5&namespace=0&format=json"
+                        resp = await client.get(op_url, headers=headers)
+                        if resp.status_code == 200:
+                            titles = resp.json()[1]
+                            for item_title in titles:
+                                enc = urllib.parse.quote(item_title.replace(" ", "_"))
+                                sr = await client.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{enc}", headers=headers)
+                                if sr.status_code == 200:
+                                    data = sr.json()
+                                    if data.get("type") == "disambiguation":
+                                        continue
+                                    img = data.get("thumbnail", {}).get("source") or data.get("originalimage", {}).get("source")
+                                    if img and not img.lower().endswith(".svg"):
+                                        cover_url = get_unscaled_cover_url(img)
+                                        break
+                        if cover_url:
+                            break
+                    except Exception:
+                        pass
+
+    # 3. Retro fallback via TheGamesDB if Wikipedia missed
+    if not cover_url and tgdb_active and (not platform or platform in TGDB_PLATFORM_MAP):
+        try:
+            tgdb = await lookup_game_thegamesdb(clean_t, platform)
+            if tgdb and tgdb.get("box_art_2d"):
+                cover_url = tgdb["box_art_2d"]
+        except Exception:
+            pass
+
+    # 4. Store in SQLite cache via a short write transaction
     if cover_url:
+        conn = get_db_connection()
+        c = conn.cursor()
         c.execute("""
         INSERT OR REPLACE INTO cached_covers (title_key, platform, cover_url)
         VALUES (?, ?, ?)
         """, (cache_key, platform, cover_url))
         conn.commit()
-
-    conn.close()
+        conn.close()
 
     if not cover_url:
         return {"cover_url": None, "found": False}

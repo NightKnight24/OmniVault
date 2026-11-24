@@ -102,15 +102,39 @@ def get_detected_volumes() -> List[Dict[str, Any]]:
         except Exception:
             pass
 
+    # Include detected local cloud sync drives (iCloud Drive, Google Drive, OneDrive)
+    try:
+        from .cloud_storage_service import CLOUD_PROVIDER_META, detect_native_cloud_mounts
+        mounts = detect_native_cloud_mounts()
+        for cid, info in mounts.items():
+            m_path = info.get("mount_path")
+            if not m_path or m_path in seen_paths:
+                continue
+            meta = CLOUD_PROVIDER_META.get(cid, {})
+            volumes.append({
+                "name": f"{meta.get('name', cid)} ({info.get('account') or 'Cloud Sync'})",
+                "path": m_path,
+                "roms_path": info.get("roms_path"),
+                "total_gb": info.get("free_gb", 0.0),
+                "free_gb": info.get("free_gb", 0.0),
+                "is_writable": True,
+                "is_portable": True,
+                "is_cloud": True,
+                "cloud_id": cid,
+            })
+            seen_paths.add(m_path)
+    except Exception:
+        pass
+
     return volumes
 
 def get_quick_setup_defaults() -> Dict[str, Any]:
     """
-    Intelligently pre-picks the optimal locations for all 4 directories:
-    On Windows: C:\\OmniVault (ROMs, Emulators, BIOS, OmniVault-Data)
+    Intelligently pre-picks the optimal locations for ROMs & App Data:
+    On Windows: C:\\OmniVault (ROMs, OmniVault-Data)
     On macOS:
     1. Prefer /Volumes/ROMS if mounted & writable
-    2. Fallback to /Volumes/GAMES or highest capacity external volume
+    2. Fallback to /Volumes/GAMES
     3. Fallback to ~/OmniVault on internal drive
     """
     if sys.platform == "win32":
@@ -119,8 +143,6 @@ def get_quick_setup_defaults() -> Dict[str, Any]:
             "preset_id": "windows_omnivault",
             "preset_label": "OmniVault Directory (C:\\OmniVault)",
             "dir_roms": str(root / "ROMs"),
-            "dir_emulators": str(root / "Emulators"),
-            "dir_bios": str(root / "BIOS"),
             "dir_app_data": str(root / "OmniVault-Data")
         }
 
@@ -147,8 +169,6 @@ def get_quick_setup_defaults() -> Dict[str, Any]:
         "preset_id": preset_id,
         "preset_label": preset_label,
         "dir_roms": roms_path,
-        "dir_emulators": str(root / "Emulators"),
-        "dir_bios": str(root / "BIOS"),
         "dir_app_data": str(root / "OmniVault-Data")
     }
 
@@ -181,7 +201,7 @@ def _get_path_info(path_str: str) -> Dict[str, Any]:
 
 def get_storage_config() -> Dict[str, Any]:
     """
-    Returns the comprehensive storage configuration including all 4 folders,
+    Returns the storage configuration (ROMs / Downloads library & App Data),
     quick defaults, detected volumes, and app bundle location.
     """
     quick_defaults = get_quick_setup_defaults()
@@ -200,7 +220,7 @@ def get_storage_config() -> Dict[str, Any]:
     try:
         conn = get_db_connection()
         c = conn.cursor()
-        c.execute("SELECT key, value FROM settings WHERE key LIKE 'dir_%' OR key IN ('storage_setup_mode', 'download_dir')")
+        c.execute("SELECT key, value FROM settings WHERE key IN ('dir_roms', 'dir_app_data', 'storage_setup_mode', 'download_dir')")
         for r in c.fetchall():
             db_settings[r["key"]] = r["value"]
         conn.close()
@@ -209,8 +229,6 @@ def get_storage_config() -> Dict[str, Any]:
 
     # Resolve paths (DB settings override pointer file, fallback to quick defaults)
     dir_roms = db_settings.get("dir_roms") or stored_config.get("dir_roms") or db_settings.get("download_dir") or quick_defaults["dir_roms"]
-    dir_emulators = db_settings.get("dir_emulators") or stored_config.get("dir_emulators") or quick_defaults["dir_emulators"]
-    dir_bios = db_settings.get("dir_bios") or stored_config.get("dir_bios") or quick_defaults["dir_bios"]
     dir_app_data = db_settings.get("dir_app_data") or stored_config.get("dir_app_data") or quick_defaults["dir_app_data"]
     setup_mode = db_settings.get("storage_setup_mode") or stored_config.get("storage_setup_mode") or "quick"
 
@@ -222,8 +240,6 @@ def get_storage_config() -> Dict[str, Any]:
                 return default_p
             return p
         dir_roms = _clean_win(dir_roms, quick_defaults["dir_roms"])
-        dir_emulators = _clean_win(dir_emulators, quick_defaults["dir_emulators"])
-        dir_bios = _clean_win(dir_bios, quick_defaults["dir_bios"])
         dir_app_data = _clean_win(dir_app_data, quick_defaults["dir_app_data"])
         app_bundle_path = r"C:\OmniVault"
     else:
@@ -236,6 +252,11 @@ def get_storage_config() -> Dict[str, Any]:
                 app_bundle_path = str(Path(__file__).resolve().parent.parent.parent.parent)
 
     detected_volumes = get_detected_volumes()
+    try:
+        from .cloud_storage_service import get_cloud_targets_status
+        cloud_targets = get_cloud_targets_status()
+    except Exception:
+        cloud_targets = {"default_target": "local", "targets": []}
 
     return {
         "mode": setup_mode, # "quick" | "custom"
@@ -246,55 +267,39 @@ def get_storage_config() -> Dict[str, Any]:
         },
         "directories": {
             "roms": _get_path_info(dir_roms),
-            "emulators": _get_path_info(dir_emulators),
-            "bios": _get_path_info(dir_bios),
             "app_data": _get_path_info(dir_app_data)
         },
-        "detected_volumes": detected_volumes
+        "detected_volumes": detected_volumes,
+        "cloud_targets": cloud_targets,
     }
 
 def save_storage_config(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Saves user choices for all 4 directories (ROMs, Emulators, BIOS, App Data)
-    and propagates changes to disk, settings DB, pointer config, and runtime services.
+    Saves user choices for ROMs / Downloads library & App Data directories
+    and propagates changes to disk, settings DB, and pointer config.
     """
     mode = payload.get("mode", "custom")
     dir_roms = payload.get("dir_roms", "").strip()
-    dir_emulators = payload.get("dir_emulators", "").strip()
-    dir_bios = payload.get("dir_bios", "").strip()
     dir_app_data = payload.get("dir_app_data", "").strip()
 
     quick_defaults = get_quick_setup_defaults()
-    if mode == "quick" or not (dir_roms and dir_emulators and dir_bios and dir_app_data):
+    if mode == "quick" or not (dir_roms and dir_app_data):
         dir_roms = quick_defaults["dir_roms"]
-        dir_emulators = quick_defaults["dir_emulators"]
-        dir_bios = quick_defaults["dir_bios"]
         dir_app_data = quick_defaults["dir_app_data"]
         mode = "quick"
 
     # Expand user paths (~/...)
     p_roms = Path(dir_roms).expanduser().resolve()
-    p_emus = Path(dir_emulators).expanduser().resolve()
-    p_bios = Path(dir_bios).expanduser().resolve()
     p_data = Path(dir_app_data).expanduser().resolve()
 
     # Create directories safely
     p_roms.mkdir(parents=True, exist_ok=True)
-    p_emus.mkdir(parents=True, exist_ok=True)
-    p_bios.mkdir(parents=True, exist_ok=True)
     p_data.mkdir(parents=True, exist_ok=True)
-
-    # Subdirectories for App Data
-    (p_data / "SaveSnapshots").mkdir(parents=True, exist_ok=True)
-    (p_data / ".mod_cache").mkdir(parents=True, exist_ok=True)
-    (p_data / "Patches").mkdir(parents=True, exist_ok=True)
 
     # Write pointer file for fast boot
     pointer_data = {
         "storage_setup_mode": mode,
         "dir_roms": str(p_roms),
-        "dir_emulators": str(p_emus),
-        "dir_bios": str(p_bios),
         "dir_app_data": str(p_data)
     }
     STORAGE_POINTER_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -314,14 +319,6 @@ def save_storage_config(payload: Dict[str, Any]) -> Dict[str, Any]:
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
         """, (str(p_roms),))
         c.execute("""
-            INSERT INTO settings (key, value) VALUES ('dir_emulators', ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-        """, (str(p_emus),))
-        c.execute("""
-            INSERT INTO settings (key, value) VALUES ('dir_bios', ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-        """, (str(p_bios),))
-        c.execute("""
             INSERT INTO settings (key, value) VALUES ('dir_app_data', ?)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
         """, (str(p_data),))
@@ -333,14 +330,6 @@ def save_storage_config(payload: Dict[str, Any]) -> Dict[str, Any]:
         conn.close()
     except Exception as e:
         print(f"[StorageConfig Save Warning]: {e}")
-
-    # Propagate to emulator manager in memory
-    try:
-        from .emulator_manager import emulator_manager
-        emulator_manager.emulators_dir = p_emus
-        emulator_manager.bios_dir = p_bios
-    except Exception:
-        pass
 
     return get_storage_config()
 
@@ -421,10 +410,6 @@ def reveal_storage_path(folder_type: str, custom_path: Optional[str] = None) -> 
         target_path = Path(custom_path).expanduser()
     elif folder_type == "roms":
         target_path = Path(config["directories"]["roms"]["path"])
-    elif folder_type == "emulators":
-        target_path = Path(config["directories"]["emulators"]["path"])
-    elif folder_type == "bios":
-        target_path = Path(config["directories"]["bios"]["path"])
     elif folder_type == "app_data":
         target_path = Path(config["directories"]["app_data"]["path"])
     elif folder_type == "app_bundle":
@@ -441,42 +426,58 @@ def reveal_storage_path(folder_type: str, custom_path: Optional[str] = None) -> 
         subprocess.run(["/usr/bin/open", str(target_path)], check=False)
     return {"status": "opened", "path": str(target_path)}
 
+def get_setup_status() -> Dict[str, Any]:
+    """Returns whether the initial launch setup wizard has been completed and current storage config."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT value FROM settings WHERE key = 'initial_setup_completed'")
+    row = c.fetchone()
+    conn.close()
+
+    is_completed = (row["value"] == "true") if row else False
+    return {
+        "initial_setup_completed": is_completed,
+        "storage": get_storage_config()
+    }
+
+def complete_setup(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Saves user onboarding storage selections and marks initial setup as completed."""
+    if "storage" in payload and isinstance(payload["storage"], dict):
+        save_storage_config(payload["storage"])
+
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO settings (key, value) VALUES ('initial_setup_completed', 'true')
+        ON CONFLICT(key) DO UPDATE SET value = 'true'
+    """)
+    if "storage_setup_mode" in payload:
+        c.execute("""
+            INSERT INTO settings (key, value) VALUES ('storage_setup_mode', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """, (str(payload["storage_setup_mode"]),))
+    conn.commit()
+    conn.close()
+
+    return {"status": "success", "message": "Initial setup completed successfully!"}
+
 # Global path accessors for backend modules
 def get_roms_dir() -> Path:
     config = get_storage_config()
     p = Path(config["directories"]["roms"]["path"])
-    p.mkdir(parents=True, exist_ok=True)
-    return p
-
-def get_emulators_dir() -> Path:
-    config = get_storage_config()
-    p = Path(config["directories"]["emulators"]["path"])
-    p.mkdir(parents=True, exist_ok=True)
-    return p
-
-def get_bios_dir() -> Path:
-    config = get_storage_config()
-    p = Path(config["directories"]["bios"]["path"])
-    p.mkdir(parents=True, exist_ok=True)
+    if not p.exists():
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
     return p
 
 def get_app_data_dir() -> Path:
     config = get_storage_config()
     p = Path(config["directories"]["app_data"]["path"])
-    p.mkdir(parents=True, exist_ok=True)
-    return p
-
-def get_snapshots_dir() -> Path:
-    p = get_app_data_dir() / "SaveSnapshots"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
-
-def get_mod_cache_dir() -> Path:
-    p = get_app_data_dir() / ".mod_cache"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
-
-def get_patches_dir() -> Path:
-    p = get_app_data_dir() / "Patches"
-    p.mkdir(parents=True, exist_ok=True)
+    if not p.exists():
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
     return p

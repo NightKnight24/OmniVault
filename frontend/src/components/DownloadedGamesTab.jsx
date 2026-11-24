@@ -1,16 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  FolderDown, Play, FolderOpen, Trash2, ShieldCheck, 
-  Search, HardDrive, Gamepad2, Sparkles, AlertTriangle, Wand2, Terminal,
-  Archive, CheckCircle2, RefreshCw, Eye
+import {
+  FolderDown, FolderOpen, Trash2, ShieldCheck,
+  Search, Sparkles, Archive, CheckCircle2, RefreshCw, Eye, Disc
 } from 'lucide-react';
-import { fetchInstalledGames, launchInstalledGame, deleteInstalledGame, verifyChecksum, extractArchive, scanLocalCollection, launchInNativeEmulator } from '../services/api';
+import {
+  fetchInstalledGames, deleteInstalledGame, verifyChecksum,
+  extractArchive, scanLocalCollection, revealLocalPath
+} from '../services/api';
 import { playClick, playVictorySound } from '../utils/soundEffects';
-import OmniPlayerModal from './OmniPlayerModal';
 
-export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOpenSettings, onOpenCheatLab, onOpenModStore }) {
-
-  const [playingGame, setPlayingGame] = useState(null);
+export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOpenCompressor }) {
   const [installedGames, setInstalledGames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isScanningCollection, setIsScanningCollection] = useState(false);
@@ -28,7 +27,7 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
       const res = await fetchInstalledGames();
       setInstalledGames(res.installed || []);
     } catch (err) {
-      console.error('Failed to load installed games:', err);
+      console.error('Failed to load downloaded ROMs:', err);
     } finally {
       setLoading(false);
     }
@@ -46,7 +45,7 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
   const handleScanCollection = async () => {
     playClick();
     setIsScanningCollection(true);
-    showToast("Scanning and scraping all ROM folders across /Volumes/ROMS...");
+    showToast('Scanning ROM download folders and indexing metadata...');
     try {
       const res = await scanLocalCollection();
       playVictorySound();
@@ -59,38 +58,9 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
     }
   };
 
-  const handleLaunch = (item) => {
-    playClick();
-    setPlayingGame(item);
-  };
-
-  const handleNativePlay = async (item) => {
-    playClick();
-    if (onSelectGame) onSelectGame(item);
-    try {
-      showToast(`Launching ${item.title}...`);
-      const res = await launchInNativeEmulator(item.path, item.platform);
-      if (res.status === 'bios_required') {
-        showToast(`Required BIOS missing: ${res.missing_bios || 'Check Settings'}`);
-        setPlayingGame(item);
-      } else {
-        playVictorySound();
-        showToast(`⚡ Dispatched to ${res.emulator || 'Standalone Emulator'}`);
-      }
-    } catch (err) {
-      console.warn('Native launch note:', err);
-      // Fallback to OmniPlayerModal if native launch had an error
-      setPlayingGame(item);
-    }
-  };
-
   const handleReveal = (path) => {
     playClick();
-    fetch('/api/downloads/open-path', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path }),
-    }).catch(() => {});
+    revealLocalPath(path).catch(() => {});
   };
 
   const handleVerify = async (path, title) => {
@@ -128,31 +98,29 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
     try {
       await deleteInstalledGame(path);
       setDeletingPath(null);
-      showToast(`Deleted "${title}" from /Volumes/ROMS`);
+      showToast(`Deleted "${title}" from ROM library`);
       loadInstalled();
     } catch (err) {
-      showToast(`Failed to delete ROM: ${err.message}`);
+      showToast(`Failed to delete file: ${err.message}`);
     }
   };
 
-  // Filtered games
   const filtered = installedGames.filter(g => {
     const matchPlat = selectedPlat === 'ALL' || g.platform.toLowerCase() === selectedPlat.toLowerCase();
     const matchSearch = !search || g.title.toLowerCase().includes(search.toLowerCase()) || g.filename.toLowerCase().includes(search.toLowerCase());
     return matchPlat && matchSearch;
   });
 
-  // Calculate stats
   const totalSizeMb = installedGames.reduce((acc, g) => acc + (g.file_size_mb || 0), 0);
   const sizeString = totalSizeMb > 1024 ? `${(totalSizeMb / 1024).toFixed(2)} GB` : `${totalSizeMb.toFixed(1)} MB`;
   const platformsPresent = Array.from(new Set(installedGames.map(g => g.platform)));
 
   return (
     <div className="space-y-6">
-      
+
       {/* Toast Alert */}
       {actionMessage && (
-        <div className="fixed top-20 right-8 z-50 px-4 py-2.5 rounded-xl bg-cyan-500 text-black font-bold text-sm shadow-glow-cyan animate-bounce flex items-center gap-2">
+        <div className="fixed top-20 right-8 z-50 px-4 py-2.5 rounded-xl bg-cyan-500 text-black font-bold text-sm shadow-glow-cyan flex items-center gap-2">
           <Sparkles className="w-4 h-4" />
           <span>{actionMessage}</span>
         </div>
@@ -164,44 +132,52 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
           <div>
             <div className="flex items-center gap-2 mb-2">
               <span className="px-2.5 py-0.5 rounded-md bg-cyan-900/60 text-cyan-300 border border-cyan-500/40 text-xs font-bold uppercase tracking-wider">
-                Local Drive Vault
-              </span>
-              <span className="text-xs text-slate-400 font-mono">
-                /Volumes/ROMS
+                Local ROM Library
               </span>
             </div>
             <h2 className="text-2xl md:text-3xl font-black text-white font-display">
-              Downloaded Classic Games
+              Downloaded ROM Library
             </h2>
             <p className="text-sm text-slate-400 mt-1">
-              Your preserved offline collection directly accessible on your ROMs volume.
+              Manage, verify, extract, and compress downloaded files in your ROM library.
             </p>
           </div>
 
-          <div className="flex items-center gap-4 flex-wrap">
-            <div className="px-4 py-3 rounded-2xl bg-slate-900/90 border border-white/10 text-center min-w-[100px]">
-              <span className="text-[11px] text-slate-400 uppercase font-semibold block">Installed</span>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="px-4 py-3 rounded-2xl bg-slate-900/90 border border-white/10 text-center min-w-[96px]">
+              <span className="text-[11px] text-slate-400 uppercase font-semibold block">Files</span>
               <span className="text-xl font-black text-cyan-400 font-mono">{installedGames.length}</span>
             </div>
 
-            <div className="px-4 py-3 rounded-2xl bg-slate-900/90 border border-white/10 text-center min-w-[100px]">
+            <div className="px-4 py-3 rounded-2xl bg-slate-900/90 border border-white/10 text-center min-w-[96px]">
               <span className="text-[11px] text-slate-400 uppercase font-semibold block">Disk Used</span>
               <span className="text-xl font-black text-violet-400 font-mono">{sizeString}</span>
             </div>
 
-            <div className="px-4 py-3 rounded-2xl bg-slate-900/90 border border-white/10 text-center min-w-[100px]">
+            <div className="px-4 py-3 rounded-2xl bg-slate-900/90 border border-white/10 text-center min-w-[96px]">
               <span className="text-[11px] text-slate-400 uppercase font-semibold block">Consoles</span>
               <span className="text-xl font-black text-emerald-400 font-mono">{platformsPresent.length}</span>
             </div>
+
+            {onOpenCompressor && (
+              <button
+                onClick={() => { playClick(); onOpenCompressor(); }}
+                className="px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-sky-500/30 text-sky-300 font-bold text-xs flex items-center gap-2 cursor-pointer transition-all shrink-0"
+                title="Open Lossless CHD / RVZ Compressor & M3U Tool"
+              >
+                <Disc className="w-4 h-4 text-sky-400" />
+                <span>ROM Compressor</span>
+              </button>
+            )}
 
             <button
               onClick={handleScanCollection}
               disabled={isScanningCollection}
               className="px-4 py-3 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-black text-xs shadow-glow-cyan flex items-center gap-2 cursor-pointer disabled:opacity-50 transition-all shrink-0"
-              title="Recursively scan all console directories in /Volumes/ROMS and scrape box arts, metadata, and trailers"
+              title="Scan all console directories in your ROM folder and index metadata"
             >
               <RefreshCw className={`w-4 h-4 ${isScanningCollection ? 'animate-spin' : ''}`} />
-              <span>{isScanningCollection ? 'Scanning ROMs...' : 'Scan & Scrape Collection'}</span>
+              <span>{isScanningCollection ? 'Scanning ROMs...' : 'Scan Local Folder'}</span>
             </button>
           </div>
         </div>
@@ -209,19 +185,17 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
 
       {/* Filter and Search Bar */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-        {/* Search */}
         <div className="w-full sm:w-72 relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search downloaded games..."
+            placeholder="Search downloaded files..."
             className="w-full bg-slate-900 border border-white/10 rounded-xl pl-10 pr-4 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-500"
           />
         </div>
 
-        {/* Platform Pills */}
         <div className="flex items-center gap-1.5 overflow-x-auto max-w-full pb-1 scrollbar-none">
           <button
             onClick={() => setSelectedPlat('ALL')}
@@ -249,29 +223,29 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
         </div>
       </div>
 
-      {/* Grid of Installed Games */}
+      {/* Grid of Downloaded ROM Files */}
       {loading ? (
         <div className="py-20 text-center">
           <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-xs text-slate-400">Scanning /Volumes/ROMS allocated directories...</p>
+          <p className="text-xs text-slate-400">Scanning ROM download directories...</p>
         </div>
       ) : filtered.length === 0 ? (
         <div className="py-20 text-center rounded-3xl border border-dashed border-white/10 p-8">
           <FolderDown className="w-12 h-12 text-slate-600 mx-auto mb-4" />
           <h3 className="text-lg font-bold text-white mb-2">
-            {installedGames.length === 0 ? 'No Games Downloaded Yet' : 'No Matching Downloaded Games Found'}
+            {installedGames.length === 0 ? 'No ROM Files Downloaded Yet' : 'No Matching Downloaded Files Found'}
           </h3>
           <p className="text-xs text-slate-400 max-w-md mx-auto mb-6">
             {installedGames.length === 0
-              ? 'Browse the Storefront, preview gameplay trailers, and download classic ROMs directly to your allocated console folders on /Volumes/ROMS.'
+              ? 'Browse the Catalog, find verified mirrors or torrents, and download ROMs directly into your organized console folders.'
               : 'Try clearing your search query or selecting a different platform filter.'}
           </p>
           {installedGames.length === 0 && (
             <button
               onClick={onNavigateStore}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-xs transition-all shadow-glow-cyan"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-xs transition-all shadow-glow-cyan cursor-pointer"
             >
-              Explore Storefront
+              Browse ROM Catalog
             </button>
           )}
         </div>
@@ -284,7 +258,6 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
             >
               <div>
                 <div className="flex items-start gap-3.5 mb-3">
-                  {/* Box Art */}
                   <div className="w-16 h-20 rounded-xl bg-black border border-white/10 overflow-hidden flex-shrink-0 flex items-center justify-center">
                     <img
                       src={item.box_art_2d || `/api/covers/image?title=${encodeURIComponent(item.title)}&platform=${encodeURIComponent(item.platform)}`}
@@ -294,7 +267,6 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
                     />
                   </div>
 
-                  {/* Title & Metadata */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-1">
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-950 text-cyan-300 border border-cyan-800">
@@ -305,7 +277,7 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
                       </span>
                     </div>
 
-                    <h4 
+                    <h4
                       onClick={() => onSelectGame(item)}
                       className="font-bold text-sm text-white truncate hover:text-cyan-400 cursor-pointer transition-colors"
                       title={item.title}
@@ -319,23 +291,21 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
                   </div>
                 </div>
 
-                {/* Checksum Result if verified */}
                 {checksumResults[item.path] && (
                   <div className="mb-3 px-2.5 py-1.5 rounded-lg bg-emerald-950/80 border border-emerald-500/40 text-[10px] text-emerald-300 flex items-center justify-between">
                     <div className="flex items-center gap-1.5 font-mono">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                       <span>CRC32: {checksumResults[item.path].crc32}</span>
                     </div>
-                    <span className="font-sans font-bold text-[9px] uppercase tracking-wider text-emerald-400">Verified Match</span>
+                    <span className="font-sans font-bold text-[9px] uppercase tracking-wider text-emerald-400">SHA1 Computed</span>
                   </div>
                 )}
 
-                {/* Local Path Tag */}
                 <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-black/40 border border-white/5 text-[10px] font-mono text-slate-400 truncate mb-4">
                   <span className="truncate">{item.path}</span>
                   <button
                     onClick={() => handleReveal(item.path)}
-                    className="ml-2 text-slate-400 hover:text-cyan-400 p-0.5"
+                    className="ml-2 text-slate-400 hover:text-cyan-400 p-0.5 cursor-pointer"
                     title="Reveal in Finder"
                   >
                     <FolderOpen className="w-3.5 h-3.5" />
@@ -348,22 +318,22 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
                 <button
                   onClick={() => handleVerify(item.path, item.title)}
                   disabled={verifyingPath === item.path}
-                  className="flex-1 flex items-center justify-center gap-1 py-1 px-2 rounded-lg bg-slate-800/90 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-semibold transition-all"
-                  title="Verify ROM Checksum (CRC32 / SHA1 against authentic dumps)"
+                  className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg bg-slate-800/90 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-semibold transition-all cursor-pointer"
+                  title="Compute CRC32 / SHA1 / MD5 checksums"
                 >
                   <ShieldCheck className={`w-3 h-3 ${verifyingPath === item.path ? 'animate-spin text-cyan-400' : 'text-emerald-400'}`} />
                   <span>{verifyingPath === item.path ? 'Verifying...' : 'Verify Hash'}</span>
                 </button>
 
-                {(item.filename.toLowerCase().endsWith('.zip') || item.filename.toLowerCase().endsWith('.7z')) && (
+                {(item.filename.toLowerCase().endsWith('.zip') || item.filename.toLowerCase().endsWith('.7z') || item.filename.toLowerCase().endsWith('.rar')) && (
                   <button
                     onClick={() => handleExtract(item.path, item.title)}
                     disabled={extractingPath === item.path}
-                    className="flex-1 flex items-center justify-center gap-1 py-1 px-2 rounded-lg bg-amber-950/40 hover:bg-amber-900/60 border border-amber-600/40 text-amber-300 text-[10px] font-semibold transition-all"
+                    className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg bg-amber-950/40 hover:bg-amber-900/60 border border-amber-600/40 text-amber-300 text-[10px] font-semibold transition-all cursor-pointer"
                     title="Extract compressed ROM archive"
                   >
                     <Archive className={`w-3 h-3 ${extractingPath === item.path ? 'animate-spin' : 'text-amber-400'}`} />
-                    <span>{extractingPath === item.path ? 'Unpacking...' : 'Extract ROM'}</span>
+                    <span>{extractingPath === item.path ? 'Unpacking...' : 'Extract Archive'}</span>
                   </button>
                 )}
               </div>
@@ -388,31 +358,28 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 gap-2">
-                    {/* Play / Launch: Primary is 1-Click Native Launch */}
                     <button
-                      onClick={() => handleNativePlay(item)}
-                      className="flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 hover:from-emerald-300 hover:to-cyan-400 text-black font-bold text-xs transition-all shadow-sm cursor-pointer hover:scale-[1.02] active:scale-98"
-                      title="1-Click Launch in Hardware-Accelerated Standalone Emulator"
+                      onClick={() => handleReveal(item.path)}
+                      className="flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-xs transition-all shadow-sm cursor-pointer hover:scale-[1.02]"
+                      title="Reveal ROM file in macOS Finder"
                     >
-                      <Play className="w-3.5 h-3.5 fill-black" />
-                      <span>Play</span>
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      <span>Finder</span>
                     </button>
 
-                    {/* Cheats & Mods Modal */}
                     <button
-                      onClick={() => onSelectGame(item)}
+                      onClick={() => { playClick(); onSelectGame(item); }}
                       className="flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/10 font-semibold text-xs transition-all cursor-pointer"
-                      title="View Cheats, Patches & Mods"
+                      title="View Game Metadata & Download Mirrors"
                     >
-                      <Wand2 className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Cheats</span>
+                      <Eye className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Details</span>
                     </button>
 
-                    {/* Delete ROM */}
                     <button
                       onClick={() => setDeletingPath(item.path)}
                       className="flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 font-semibold text-xs transition-all cursor-pointer"
-                      title="Delete ROM from drive"
+                      title="Delete file from drive"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                       <span>Delete</span>
@@ -425,19 +392,6 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
           ))}
         </div>
       )}
-
-      {/* In-App Interactive Emulator Player Modal */}
-      {playingGame && (
-        <OmniPlayerModal
-          game={playingGame}
-          onClose={() => setPlayingGame(null)}
-          onOpenSettings={onOpenSettings}
-          onOpenCheatLab={onOpenCheatLab}
-          onOpenModStore={onOpenModStore}
-        />
-      )}
-
-
     </div>
   );
 }

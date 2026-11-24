@@ -1,29 +1,33 @@
 import math
 import os
 import re
-import ssl
-import urllib.request
 import urllib.parse
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, Body
 from typing import Optional, List, Dict, Any
 from ..database import get_db_connection, row_to_game_dict
-from ..services.cheats_service import get_cheats_for_game
-from ..services.patches_mods_service import get_patches_and_mods_for_game
-from ..services.mirror_resolver import mirror_resolver
+from ..scrapers.providers.manager import get_all_providers
+from ..services.mirror_resolver import mirror_resolver, list_mirror_sources
+from ..services.realdebrid_service import get_supported_hoster_domains, is_realdebrid_active
+from ..services.thegamesdb_service import (
+    enrich_game_by_id,
+    is_thegamesdb_active,
+    lookup_game_thegamesdb,
+)
+from ..services.video_service import resolve_game_videos
 
 CONSOLE_FAMILIES = {
     "playstation": {
         "id": "playstation",
         "name": "PlayStation",
         "badge": "SONY",
-        "platforms": ["PS1", "PS2", "PS3", "PS4", "PSP", "PSVita"]
+        "platforms": ["PS1", "PS2", "PS3", "PS4", "PS5", "PSP", "PSVita"]
     },
     "nintendo_home": {
         "id": "nintendo_home",
         "name": "Nintendo Home",
         "badge": "NIN-HOME",
-        "platforms": ["NES", "SNES", "N64", "GameCube", "Wii", "WiiU", "Switch"]
+        "platforms": ["NES", "SNES", "N64", "GameCube", "Wii", "WiiU", "Switch", "Switch2"]
     },
     "nintendo_handheld": {
         "id": "nintendo_handheld",
@@ -36,6 +40,12 @@ CONSOLE_FAMILIES = {
         "name": "Xbox",
         "badge": "MS",
         "platforms": ["Xbox", "Xbox360"]
+    },
+    "pc_desktop": {
+        "id": "pc_desktop",
+        "name": "PC & Mac",
+        "badge": "PC / MAC",
+        "platforms": ["Windows", "macOS"]
     },
     "sega": {
         "id": "sega",
@@ -272,7 +282,7 @@ def toggle_favorite(game_id: str):
     return {"game_id": game_id, "is_favorite": is_fav, "total_favorites": total_favs}
 
 @router.get("/{game_id}")
-def get_game(game_id: str):
+async def get_game(game_id: str):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -286,8 +296,8 @@ def get_game(game_id: str):
     WHERE g.id = ?
     """, (game_id,))
     row = cursor.fetchone()
+    conn.close()
     if not row:
-        conn.close()
         raise HTTPException(status_code=404, detail="Game not found")
 
     game_dict = row_to_game_dict(row)
@@ -310,6 +320,35 @@ def get_game(game_id: str):
         or "NV2A" in desc
         or len(desc.strip()) < 85
     )
+
+    updated_fields = False
+    if is_generic_desc and is_thegamesdb_active():
+        try:
+            tgdb = await lookup_game_thegamesdb(
+                game_dict.get("title", ""),
+                game_dict.get("platform"),
+            )
+            if tgdb:
+                if tgdb.get("description"):
+                    game_dict["description"] = tgdb["description"]
+                    is_generic_desc = False
+                    updated_fields = True
+                if tgdb.get("release_year") and (game_dict.get("release_year") is None or updated_fields):
+                    game_dict["release_year"] = tgdb["release_year"]
+                    updated_fields = True
+                old_box = game_dict.get("box_art_2d") or ""
+                if tgdb.get("box_art_2d") and (not old_box or "libretro-thumbnails" in old_box):
+                    game_dict["box_art_2d"] = tgdb["box_art_2d"]
+                    game_dict["box_art_3d"] = game_dict.get("box_art_3d") or tgdb["box_art_2d"]
+                    game_dict["backdrop"] = game_dict.get("backdrop") or tgdb["box_art_2d"]
+                    updated_fields = True
+                old_trailer = game_dict.get("trailer_url") or ""
+                if tgdb.get("trailer_url") and (not old_trailer or "listType=search" in old_trailer):
+                    game_dict["trailer_url"] = tgdb["trailer_url"]
+                    updated_fields = True
+        except Exception:
+            pass
+
     if (
         is_generic_desc
         or dev in placeholder_devs
@@ -323,45 +362,123 @@ def get_game(game_id: str):
         if wiki:
             if wiki.get("description") and is_generic_desc:
                 game_dict["description"] = wiki["description"]
+                updated_fields = True
             if wiki.get("release_year") and (game_dict.get("release_year") is None or is_generic_desc):
                 game_dict["release_year"] = wiki["release_year"]
+                updated_fields = True
             if wiki.get("developer") and (dev in placeholder_devs or not dev):
                 game_dict["developer"] = wiki["developer"]
+                updated_fields = True
             elif dev in placeholder_devs:
                 game_dict["developer"] = None
             if wiki.get("publisher") and (pub in placeholder_devs or not pub):
                 game_dict["publisher"] = wiki["publisher"]
+                updated_fields = True
             elif pub in placeholder_devs:
                 game_dict["publisher"] = None
-
-            cursor.execute(
-                "UPDATE games SET description = ?, release_year = ?, developer = ?, publisher = ? WHERE id = ?",
-                (
-                    game_dict.get("description"),
-                    game_dict.get("release_year"),
-                    game_dict.get("developer"),
-                    game_dict.get("publisher"),
-                    game_id,
-                )
-            )
-            conn.commit()
         else:
             if dev in placeholder_devs:
                 game_dict["developer"] = None
             if pub in placeholder_devs:
                 game_dict["publisher"] = None
 
-    title_enc = urllib.parse.quote(game_dict.get("title", ""))
-    plat_name = urllib.parse.quote(game_dict.get("platform_name") or game_dict.get("platform", ""))
-    game_dict["web_search_helpers"] = [
-        {"name": "Internet Archive", "url": f"https://archive.org/search.php?query={title_enc}+{plat_name}"},
-        {"name": "DuckDuckGo", "url": f"https://duckduckgo.com/?q={title_enc}+{plat_name}+preservation+archive"},
-        {"name": "Vimm's Lair", "url": f"https://vimm.net/vault/?p=list&q={title_enc}" if game_dict.get("platform") in ("NES", "SNES", "N64", "GameCube", "Wii", "PS1", "PS2", "Genesis") else None},
-        {"name": "RomsFun", "url": f"https://romsfun.com/?s={title_enc}"}
-    ]
+    if updated_fields:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE games
+            SET description = ?, release_year = ?, developer = ?, publisher = ?,
+                box_art_2d = ?, box_art_3d = ?, backdrop = ?, trailer_url = ?
+            WHERE id = ?
+            """,
+            (
+                game_dict.get("description"),
+                game_dict.get("release_year"),
+                game_dict.get("developer"),
+                game_dict.get("publisher"),
+                game_dict.get("box_art_2d"),
+                game_dict.get("box_art_3d"),
+                game_dict.get("backdrop"),
+                game_dict.get("trailer_url"),
+                game_id,
+            ),
+        )
+        conn.commit()
+        conn.close()
 
-    conn.close()
+    plat_raw = game_dict.get("platform", "")
+    plat_up = plat_raw.strip().upper()
+
+    helpers: List[Dict[str, Any]] = []
+    seen_ids = set()
+    has_archive_org = False
+
+    for src in list_mirror_sources(enabled_only=True):
+        plats = [str(p).strip().upper() for p in (src.get("platforms") or [])]
+        if plats and "ALL" not in plats and "ALL SYSTEMS" not in plats and plat_up not in plats:
+            continue
+        src_id = src["id"]
+        adapter = (src.get("adapter") or "html_search").strip()
+        if adapter == "archive_org" or src_id == "archive-org":
+            has_archive_org = True
+        if src_id in seen_ids:
+            continue
+        seen_ids.add(src_id)
+        helpers.append({
+            "source_id": src_id,
+            "name": src["name"],
+            "adapter": adapter,
+            "can_scrape": adapter != "directory_link",
+            "supports_direct_download": bool(src.get("supports_direct_download")),
+            "url": src.get("url", ""),
+            "description": src.get("description") or src.get("source_type") or "User-configured BYOS source",
+        })
+
+    if not has_archive_org:
+        helpers.append({
+            "source_id": "archive-org",
+            "name": "Internet Archive (Archive.org)",
+            "adapter": "archive_org",
+            "can_scrape": True,
+            "supports_direct_download": True,
+            "url": "https://archive.org",
+            "description": "Public archival collections on Archive.org",
+        })
+
+    try:
+        for prov in get_all_providers():
+            if not prov.get("is_enabled"):
+                continue
+            pid = prov["id"]
+            if pid in seen_ids:
+                continue
+            if prov.get("type") in ("torznab", "torrent", "json_torrent_api", "rss_torrent_feed"):
+                seen_ids.add(pid)
+                helpers.append({
+                    "source_id": pid,
+                    "name": prov["name"],
+                    "adapter": prov["type"],
+                    "can_scrape": True,
+                    "supports_direct_download": False,
+                    "url": prov.get("endpoint_url") or "",
+                    "description": f"In-app P2P / {prov.get('type')} indexer",
+                })
+    except Exception as pe:
+        print(f"[Helpers provider list note]: {pe}")
+
+    game_dict["web_search_helpers"] = helpers
+
     return game_dict
+
+
+@router.post("/{game_id}/enrich-tgdb")
+async def enrich_game_thegamesdb(game_id: str):
+    """On-demand metadata and cover enrichment via TheGamesDB."""
+    result = await enrich_game_by_id(game_id)
+    if result.get("status") == "error" and result.get("message") == "Game not found":
+        raise HTTPException(status_code=404, detail="Game not found")
+    return result
 
 @router.post("/{game_id}/set-source")
 def set_game_source(game_id: str, payload: Dict[str, Any] = Body(...)):
@@ -378,68 +495,7 @@ def set_game_source(game_id: str, payload: Dict[str, Any] = Body(...)):
     """, (direct_url or None, magnet_uri or None, game_id))
     conn.commit()
     conn.close()
-    return {"status": "updated", "game_id": game_id, "direct_download_url": direct_url or None}
-
-VIDEO_CACHE: Dict[str, str] = {}
-
-@router.get("/{game_id}/video")
-def get_game_video(game_id: str, mode: str = "gameplay"):
-    """
-    Dynamically resolves a verified YouTube video ID for 60FPS gameplay or official trailers.
-    Eliminates broken listType=search iframe embeds.
-    """
-    cache_key = f"{game_id}:{mode}"
-    if cache_key in VIDEO_CACHE:
-        vid = VIDEO_CACHE[cache_key]
-        return {
-            "game_id": game_id,
-            "mode": mode,
-            "video_id": vid,
-            "embed_url": f"https://www.youtube-nocookie.com/embed/{vid}?autoplay=1&rel=0"
-        }
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT title, platform FROM games WHERE id = ?", (game_id,))
-    row = cursor.fetchone()
-    conn.close()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Game not found")
-
-    title = row["title"]
-    platform = row["platform"]
-    clean = re.sub(r'\s*[\(\[].*?[\)\]]', '', title).strip()
-    if ", The" in clean:
-        clean = "The " + clean.replace(", The", "")
-    elif ", A" in clean:
-        clean = "A " + clean.replace(", A", "")
-
-    term = f"{clean} {platform} 60fps gameplay longplay" if mode == "gameplay" else f"{clean} {platform} official game trailer"
-    vid_id = None
-    try:
-        url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(term)
-        headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
-        ctx = ssl._create_unverified_context()
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=4, context=ctx) as resp:
-            html = resp.read().decode("utf-8", errors="ignore")
-            vids = re.findall(r'\"videoId\":\"([a-zA-Z0-9_-]{11})\"', html)
-            if vids:
-                vid_id = vids[0]
-    except Exception:
-        pass
-
-    if not vid_id:
-        vid_id = "dQw4w9WgXcQ"
-
-    VIDEO_CACHE[cache_key] = vid_id
-    return {
-        "game_id": game_id,
-        "mode": mode,
-        "video_id": vid_id,
-        "embed_url": f"https://www.youtube-nocookie.com/embed/{vid_id}?autoplay=1&rel=0"
-    }
+    return {"status": "updated", "game_id": game_id, "direct_download_url": direct_url or None, "magnet_uri": magnet_uri or None}
 
 @router.post("/{game_id}/rate")
 def rate_game(game_id: str, payload: Dict[str, Any] = Body(...)):
@@ -508,8 +564,8 @@ def get_game_reviews(game_id: str):
     user_review = None
     if user_row and (user_row["review"] or user_row["rating"]):
         user_review = {
-            "author": "You (Local Player)",
-            "avatar": "https://api.dicebear.com/7.x/bottts/svg?seed=localplayer",
+            "author": "You",
+            "avatar": "https://api.dicebear.com/7.x/bottts/svg?seed=localuser",
             "rating": float(user_row["rating"]) if user_row["rating"] else 5.0,
             "review_text": user_row["review"] or "Rated in OmniVault",
             "created_at": user_row["updated_at"],
@@ -607,105 +663,42 @@ def post_game_review(game_id: str, payload: Dict[str, Any] = Body(...)):
         "rating_count": cnt_rating
     }
 
-@router.get("/{game_id}/cheats")
-def get_game_cheats(game_id: str):
+@router.get("/{game_id}/videos")
+async def get_game_videos(game_id: str):
+    """Resolves and caches inline YouTube trailer & gameplay videos for any catalog entry."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT title, platform FROM games WHERE id = ?", (game_id,))
+    cursor.execute(
+        "SELECT id, title, platform, platform_name, trailer_url FROM games WHERE id = ?",
+        (game_id,),
+    )
     row = cursor.fetchone()
     conn.close()
-    
     if not row:
         raise HTTPException(status_code=404, detail="Game not found")
-        
-    cheats = get_cheats_for_game(row["title"], row["platform"])
+
+    videos = await resolve_game_videos(
+        game_id=row["id"],
+        title=row["title"],
+        platform=row["platform"],
+        platform_name=row["platform_name"] or row["platform"],
+        existing_trailer_url=row["trailer_url"],
+    )
     return {
-        "game_id": game_id,
+        "game_id": row["id"],
         "title": row["title"],
         "platform": row["platform"],
-        "count": len(cheats),
-        "cheats": cheats
+        **videos,
     }
 
-@router.get("/{game_id}/patches-mods")
-def get_game_patches_and_mods(game_id: str):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT title, platform FROM games WHERE id = ?", (game_id,))
-    row = cursor.fetchone()
-    conn.close()
-    
-    if not row:
-        raise HTTPException(status_code=404, detail="Game not found")
-        
-    data = get_patches_and_mods_for_game(row["title"], row["platform"])
-    return {
-        "game_id": game_id,
-        "title": row["title"],
-        "platform": row["platform"],
-        **data
-    }
-
-@router.post("/{game_id}/export-cheats")
-def export_cheats_to_disk(game_id: str, payload: Dict[str, Any] = Body(default={})):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT title, platform FROM games WHERE id = ?", (game_id,))
-    row = cursor.fetchone()
-    conn.close()
-    
-    if not row:
-        raise HTTPException(status_code=404, detail="Game not found")
-        
-    platform = row["platform"]
-    title = row["title"]
-    custom_cheats = payload.get("cheats")
-    enabled_codes = set(payload.get("enabled_codes") or [])
-    cheats = custom_cheats if isinstance(custom_cheats, list) and custom_cheats else get_cheats_for_game(title, platform)
-    
-    # Target directory on configured ROMs directory /{platform}
-    from ..services.storage_service import get_roms_dir
-    plat_dir = get_roms_dir() / platform
-    plat_dir.mkdir(parents=True, exist_ok=True)
-    
-    safe_name = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip()
-    cht_path = plat_dir / f"{safe_name}.cht"
-    
-    lines = [f"cheats = {len(cheats)}\n"]
-    for i, c in enumerate(cheats):
-        desc = c.get("description") or c.get("effect") or f"Cheat #{i+1}"
-        code = c.get("code") or c.get("game_genie_code") or ""
-        is_enabled = bool(c.get("enabled") or (code in enabled_codes))
-        lines.append(f'cheat{i}_desc = "{desc}"')
-        lines.append(f'cheat{i}_code = "{code}"')
-        lines.append(f"cheat{i}_enable = {'true' if is_enabled else 'false'}\n")
-        
-    content = "\n".join(lines)
-    with open(cht_path, "w", encoding="utf-8") as f:
-        f.write(content)
-
-    # Also sync to RetroArch's cheat directory so native RetroArch sessions pick it up immediately
-    ra_cheat_dir = Path.home() / "Library" / "Application Support" / "RetroArch" / "cheats" / platform
-    try:
-        ra_cheat_dir.mkdir(parents=True, exist_ok=True)
-        with open(ra_cheat_dir / f"{safe_name}.cht", "w", encoding="utf-8") as f:
-            f.write(content)
-    except Exception:
-        pass
-        
-    return {
-        "status": "success",
-        "file_path": str(cht_path),
-        "message": f"Saved {len(cheats)} cheats to {cht_path.name} (and synced to RetroArch cheats)"
-    }
 
 @router.get("/{game_id}/mirrors")
 @router.get("/{game_id}/streams")
-async def get_game_mirrors(game_id: str):
+async def get_game_mirrors(game_id: str, source_id: Optional[str] = Query(None)):
     """
     ROM Mirror & Torrent Resolution:
-    Aggregates verified live mirrors and individual ROM downloads (ConsoleRoms,
-    RomsFast, RomsLab Switch NSPs, BlueRoms, P2P Torrents) on-demand for any game.
+    Aggregates verified live mirrors from user-configured BYOS sources and indexers on-demand for any game,
+    or scrapes a single specified source_id directly inside OmniVault.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -721,7 +714,7 @@ async def get_game_mirrors(game_id: str):
 
     title = row["title"]
     platform = row["platform"]
-    mirrors = await mirror_resolver.get_rom_mirrors(title, platform)
+    mirrors = await mirror_resolver.get_rom_mirrors(title, platform, source_id=source_id)
 
     # If the first mirror has a verified non-zero file size, update the game's file_size_mb
     if mirrors and mirrors[0].get("file_size_mb", 0) > 0:
@@ -732,9 +725,9 @@ async def get_game_mirrors(game_id: str):
         conn.commit()
         conn.close()
 
-    # If the catalog has a non-archive.org direct URL not already in mirrors, include as fallback
+    # If the catalog has a direct URL not already in mirrors, include as fallback
     cat_url = row["direct_download_url"]
-    if cat_url and "archive.org" not in cat_url:
+    if cat_url and not source_id:
         if not any(s.get("direct_url") == cat_url for s in mirrors):
             mirrors.append({
                 "id": f"mirror-{len(mirrors)+1}",
@@ -754,6 +747,8 @@ async def get_game_mirrors(game_id: str):
                 "rank": len(mirrors) + 1
             })
 
+    rd_active = is_realdebrid_active()
+    rd_unlocked = sum(1 for m in mirrors if m.get("is_realdebrid"))
     return {
         "game_id": game_id,
         "title": title,
@@ -761,5 +756,8 @@ async def get_game_mirrors(game_id: str):
         "total_mirrors": len(mirrors),
         "mirrors": mirrors,
         "total_streams": len(mirrors),
-        "streams": mirrors
+        "streams": mirrors,
+        "realdebrid_active": rd_active,
+        "realdebrid_unlocked_count": rd_unlocked,
+        "supported_hosts_count": len(get_supported_hoster_domains()),
     }

@@ -12,6 +12,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app/backend
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    aria2 \
+    p7zip-full \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir \
     fastapi \
     "uvicorn[standard]" \

@@ -15,7 +15,7 @@ UVICORN_BIN = VENV_BIN / "uvicorn"
 
 def main():
     print("==================================================")
-    print("   🎮 OMNIVAULT • Classic ROM Store & Scraper")
+    print("   🔍 OMNIVAULT • ROM Finder & Download Manager")
     print("==================================================")
     
     # 1. Ensure backend virtualenv exists
@@ -47,7 +47,7 @@ def main():
     time.sleep(1.2)
 
     url = f"http://127.0.0.1:{port}"
-    print(f"-> Opening OmniVault Storefront: {url}")
+    print(f"-> Opening OmniVault Finder: {url}")
     webbrowser.open(url)
 
     print("\n[OmniVault Running] Press Ctrl+C in this terminal to stop.")

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Star, Download, Film, Sparkles, Heart, Gamepad2 } from 'lucide-react';
+import { Star, Download, Search, Sparkles, Heart, Gamepad2 } from 'lucide-react';
 import { playClick, playCoin, playFavoriteSound } from '../utils/soundEffects';
 
 const PLATFORM_COLORS = {
@@ -9,7 +9,11 @@ const PLATFORM_COLORS = {
   PS2: 'bg-indigo-900/40 text-indigo-300 border-indigo-500/40',
   PS3: 'bg-sky-900/40 text-sky-300 border-sky-500/40',
   PS4: 'bg-blue-950/60 text-blue-200 border-blue-400/40',
+  PS5: 'bg-indigo-950/70 text-white border-indigo-400/50',
+  Windows: 'bg-sky-950/60 text-sky-200 border-sky-400/40',
+  macOS: 'bg-slate-800/80 text-slate-100 border-slate-400/40',
   Switch: 'bg-red-900/40 text-red-300 border-red-500/40',
+  Switch2: 'bg-rose-900/50 text-rose-200 border-rose-500/50',
   GBA: 'bg-amber-900/40 text-amber-300 border-amber-500/40',
   Genesis: 'bg-red-900/40 text-red-300 border-red-500/40',
   NES: 'bg-rose-900/40 text-rose-300 border-rose-500/40',
@@ -23,14 +27,18 @@ const PLATFORM_GRADIENTS = {
   PS2: 'from-blue-950 via-slate-900 to-indigo-950',
   PS3: 'from-slate-950 via-sky-950 to-slate-900',
   PS4: 'from-blue-950 via-slate-950 to-blue-900',
+  PS5: 'from-slate-950 via-blue-950 to-indigo-900',
+  Windows: 'from-sky-950 via-slate-900 to-cyan-950',
+  macOS: 'from-slate-900 via-zinc-900 to-slate-950',
   Switch: 'from-red-950 via-slate-900 to-rose-950',
+  Switch2: 'from-rose-950 via-slate-900 to-red-900',
   GBA: 'from-amber-950 via-slate-900 to-orange-950',
   Genesis: 'from-red-950 via-slate-900 to-zinc-950',
   NES: 'from-rose-950 via-slate-900 to-stone-950',
   Arcade: 'from-amber-950 via-slate-900 to-yellow-950',
 };
 
-const MODERN_PLATFORMS = ['Switch', 'Xbox360', 'PS3', 'PS4', 'PSVita', '3DS', 'Xbox', 'WiiU', 'Arcade', 'Wii', 'Saturn', 'Dreamcast'];
+const MODERN_PLATFORMS = ['Switch', 'Switch2', 'Xbox360', 'PS3', 'PS4', 'PS5', 'PSVita', '3DS', 'Xbox', 'WiiU', 'Windows', 'macOS', 'Arcade', 'Wii', 'Saturn', 'Dreamcast'];
 
 const formatSize = (mb) => {
   if (!mb || mb <= 0) return 'ROM';
@@ -141,10 +149,10 @@ export default function GameCard({ game, onSelect, onQuickDownload, onToggleFavo
           </div>
         )}
 
-        {/* Hover Overlay with Trailer Icon */}
+        {/* Hover Overlay with Finder Icon */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-2">
           <div className="w-12 h-12 rounded-full bg-cyan-500 text-black flex items-center justify-center shadow-lg transform scale-75 group-hover:scale-100 transition-transform duration-300">
-            <Film className="w-6 h-6 ml-0.5" />
+            <Search className="w-5 h-5" />
           </div>
         </div>
 

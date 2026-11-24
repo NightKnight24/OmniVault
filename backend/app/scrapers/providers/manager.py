@@ -1,121 +1,113 @@
 import asyncio
+import json
 import uuid
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
 from ...database import get_db_connection
 from .base import BaseSearchProvider
+from .json_torrent_provider import JsonTorrentApiProvider
+from .rss_torrent_provider import RssTorrentFeedProvider
 from .torznab_provider import TorznabSearchProvider
-from .tpb_provider import ThePirateBaySearchProvider
-from .nyaa_provider import NyaaGamesSearchProvider
 
-class RomMirrorSearchProvider(BaseSearchProvider):
-    def __init__(self):
-        super().__init__(
-            provider_id="rom_mirrors",
-            name="Direct ROM Mirrors (ConsoleRoms / RomsFast / BlueRoms)",
-            provider_type="builtin",
-            is_enabled=True
-        )
+SUPPORTED_PROVIDER_TYPES = ("torznab", "json_torrent_api", "rss_torrent_feed")
 
-    async def search(self, query: str, platform: str, limit: int = 15) -> List[Dict[str, Any]]:
-        from ...services.mirror_resolver import mirror_resolver
-        mirrors = await mirror_resolver.get_rom_mirrors(query, platform)
-        results = []
-        for s in mirrors[:limit]:
-            results.append({
-                "id": s["id"],
-                "title": s["title"],
-                "platform": s["platform"],
-                "platform_name": s["platform"],
-                "source": s["source_name"],
-                "direct_download_url": s["direct_url"] if s.get("is_direct") else None,
-                "magnet_uri": s["direct_url"] if not s.get("is_direct") else None,
-                "torrent_url": None,
-                "file_size_mb": s.get("file_size_mb", 0.0),
-                "seeders": 25 if not s.get("is_direct") else None,
-                "leechers": 2 if not s.get("is_direct") else None,
-                "description": f"{s.get('quality', 'Verified Mirror')} • Format: {s.get('format', 'ROM')}",
-                "year": None
-            })
-        return results
+
+def _parse_config(raw: Optional[str]) -> Dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
 
 def get_all_providers() -> List[Dict[str, Any]]:
-    builtin_mirror = RomMirrorSearchProvider()
-    builtin_tpb = ThePirateBaySearchProvider()
-    builtin_nyaa = NyaaGamesSearchProvider()
-
-    providers_list = [
-        {
-            "id": builtin_mirror.provider_id,
-            "name": builtin_mirror.name,
-            "type": builtin_mirror.provider_type,
-            "endpoint_url": "https://downloads.consoleroms.com",
-            "api_key": None,
-            "is_enabled": builtin_mirror.is_enabled,
-            "is_builtin": True
-        },
-        {
-            "id": builtin_tpb.provider_id,
-            "name": builtin_tpb.name,
-            "type": builtin_tpb.provider_type,
-            "endpoint_url": "https://apibay.org",
-            "api_key": None,
-            "is_enabled": builtin_tpb.is_enabled,
-            "is_builtin": True
-        },
-        {
-            "id": builtin_nyaa.provider_id,
-            "name": builtin_nyaa.name,
-            "type": builtin_nyaa.provider_type,
-            "endpoint_url": "https://nyaa.si",
-            "api_key": None,
-            "is_enabled": builtin_nyaa.is_enabled,
-            "is_builtin": True
-        }
-    ]
-    
+    """Returns all user-configured BYOS search indexers & torrent feeds."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM custom_providers ORDER BY created_at ASC")
     rows = cursor.fetchall()
     conn.close()
-    
+
+    providers_list: List[Dict[str, Any]] = []
     for r in rows:
+        cfg_raw = r["config_json"] if "config_json" in r.keys() else "{}"
         providers_list.append({
             "id": r["id"],
             "name": r["name"],
             "type": r["type"],
             "endpoint_url": r["endpoint_url"],
             "api_key": r["api_key"],
+            "config": _parse_config(cfg_raw),
             "is_enabled": bool(r["is_enabled"]),
-            "is_builtin": False
+            "is_builtin": False,
         })
-        
     return providers_list
 
+
+def build_provider_instance(
+    provider_id: str,
+    name: str,
+    provider_type: str,
+    endpoint_url: str,
+    api_key: str = "",
+    config: Optional[Dict[str, Any]] = None,
+    is_enabled: bool = True,
+) -> BaseSearchProvider:
+    ptype = (provider_type or "torznab").strip()
+    cfg = config if isinstance(config, dict) else {}
+    if ptype == "json_torrent_api":
+        return JsonTorrentApiProvider(
+            provider_id=provider_id,
+            name=name,
+            endpoint_url=endpoint_url,
+            config=cfg,
+            is_enabled=is_enabled,
+        )
+    if ptype == "rss_torrent_feed":
+        return RssTorrentFeedProvider(
+            provider_id=provider_id,
+            name=name,
+            endpoint_url=endpoint_url,
+            config=cfg,
+            is_enabled=is_enabled,
+        )
+    return TorznabSearchProvider(
+        provider_id=provider_id,
+        name=name,
+        endpoint_url=endpoint_url,
+        api_key=api_key or "",
+        is_enabled=is_enabled,
+    )
+
+
 def get_active_provider_instances() -> List[BaseSearchProvider]:
-    instances: List[BaseSearchProvider] = [
-        RomMirrorSearchProvider(),
-        ThePirateBaySearchProvider(),
-        NyaaGamesSearchProvider()
-    ]
-    
+    instances: List[BaseSearchProvider] = []
+
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM custom_providers WHERE is_enabled = 1")
+    cursor.execute("SELECT * FROM custom_providers WHERE is_enabled = 1 ORDER BY created_at ASC")
     rows = cursor.fetchall()
     conn.close()
-    
+
     for r in rows:
-        if r["type"] == "torznab":
-            instances.append(TorznabSearchProvider(
+        ptype = (r["type"] or "torznab").strip()
+        cfg = _parse_config(r["config_json"] if "config_json" in r.keys() else "{}")
+        instances.append(
+            build_provider_instance(
                 provider_id=r["id"],
                 name=r["name"],
+                provider_type=ptype,
                 endpoint_url=r["endpoint_url"],
                 api_key=r["api_key"] or "",
-                is_enabled=True
-            ))
-            
+                config=cfg,
+                is_enabled=True,
+            )
+        )
+
     return instances
+
 
 async def search_all_providers(query: str, platform: str, limit: int = 15) -> List[Dict[str, Any]]:
     active_instances = get_active_provider_instances()
@@ -125,7 +117,7 @@ async def search_all_providers(query: str, platform: str, limit: int = 15) -> Li
     tasks = [p.search(query, platform, limit=limit) for p in active_instances]
     results_lists = await asyncio.gather(*tasks, return_exceptions=True)
 
-    combined = []
+    combined: List[Dict[str, Any]] = []
     for res in results_lists:
         if isinstance(res, list):
             combined.extend(res)
@@ -134,24 +126,79 @@ async def search_all_providers(query: str, platform: str, limit: int = 15) -> Li
 
     return combined
 
-def add_custom_provider(name: str, endpoint_url: str, api_key: str = "", provider_type: str = "torznab") -> Dict[str, Any]:
-    provider_id = f"prov-{uuid.uuid4().hex[:8]}"
+
+def add_custom_provider(
+    name: str,
+    endpoint_url: str,
+    api_key: str = "",
+    provider_type: str = "torznab",
+    config: Optional[Dict[str, Any]] = None,
+    provider_id: Optional[str] = None,
+    is_enabled: bool = True,
+) -> Dict[str, Any]:
+    ptype = (provider_type or "torznab").strip()
+    if ptype not in SUPPORTED_PROVIDER_TYPES:
+        raise ValueError(f"Unsupported provider type '{ptype}'. Must be one of: {', '.join(SUPPORTED_PROVIDER_TYPES)}")
+
+    cleaned_url = endpoint_url.strip()
+    cleaned_name = name.strip()
+    cleaned_key = (api_key or "").strip()
+    cfg_dict = config if isinstance(config, dict) else {}
+    cfg_str = json.dumps(cfg_dict)
+    enabled_int = 1 if is_enabled else 0
+
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-    INSERT INTO custom_providers (id, name, type, endpoint_url, api_key, is_enabled)
-    VALUES (?, ?, ?, ?, ?, 1)
-    """, (provider_id, name.strip(), provider_type, endpoint_url.strip(), api_key.strip()))
+
+    existing_id = None
+    if provider_id:
+        cursor.execute("SELECT id FROM custom_providers WHERE id = ?", (provider_id.strip(),))
+        row = cursor.fetchone()
+        if row:
+            existing_id = row["id"]
+
+    if not existing_id:
+        cursor.execute(
+            "SELECT id FROM custom_providers WHERE type = ? AND endpoint_url = ?",
+            (ptype, cleaned_url),
+        )
+        row = cursor.fetchone()
+        if row:
+            existing_id = row["id"]
+
+    final_id = (provider_id.strip() if provider_id else None) or existing_id or f"prov-{uuid.uuid4().hex[:8]}"
+
+    if existing_id:
+        cursor.execute(
+            """
+            UPDATE custom_providers
+            SET name = ?, type = ?, endpoint_url = ?, api_key = ?, config_json = ?, is_enabled = ?
+            WHERE id = ?
+            """,
+            (cleaned_name, ptype, cleaned_url, cleaned_key, cfg_str, enabled_int, existing_id),
+        )
+        final_id = existing_id
+    else:
+        cursor.execute(
+            """
+            INSERT INTO custom_providers (id, name, type, endpoint_url, api_key, config_json, is_enabled)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (final_id, cleaned_name, ptype, cleaned_url, cleaned_key, cfg_str, enabled_int),
+        )
+
     conn.commit()
     conn.close()
     return {
-        "id": provider_id,
-        "name": name.strip(),
-        "type": provider_type,
-        "endpoint_url": endpoint_url.strip(),
-        "is_enabled": True,
-        "is_builtin": False
+        "id": final_id,
+        "name": cleaned_name,
+        "type": ptype,
+        "endpoint_url": cleaned_url,
+        "config": cfg_dict,
+        "is_enabled": bool(enabled_int),
+        "is_builtin": False,
     }
+
 
 def delete_custom_provider(provider_id: str) -> bool:
     conn = get_db_connection()
@@ -162,6 +209,7 @@ def delete_custom_provider(provider_id: str) -> bool:
     conn.close()
     return deleted
 
+
 def toggle_custom_provider(provider_id: str) -> Optional[bool]:
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -170,12 +218,13 @@ def toggle_custom_provider(provider_id: str) -> Optional[bool]:
     if not row:
         conn.close()
         return None
-        
+
     new_state = 0 if row["is_enabled"] else 1
     cursor.execute("UPDATE custom_providers SET is_enabled = ? WHERE id = ?", (new_state, provider_id))
     conn.commit()
     conn.close()
     return bool(new_state)
+
 
 # ----------------- Custom Search Templates -----------------
 
@@ -187,23 +236,64 @@ def get_search_templates() -> List[Dict[str, Any]]:
     conn.close()
     return [dict(r) for r in rows]
 
-def add_search_template(name: str, url_template: str, description: str = "") -> Dict[str, Any]:
-    tpl_id = f"tpl-{uuid.uuid4().hex[:8]}"
+
+def add_search_template(
+    name: str,
+    url_template: str,
+    description: str = "",
+    template_id: Optional[str] = None,
+    is_enabled: bool = True,
+) -> Dict[str, Any]:
+    cleaned_name = name.strip()
+    cleaned_tpl = url_template.strip()
+    cleaned_desc = (description or "").strip()
+    enabled_int = 1 if is_enabled else 0
+
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-    INSERT INTO custom_search_templates (id, name, url_template, description, is_enabled)
-    VALUES (?, ?, ?, ?, 1)
-    """, (tpl_id, name.strip(), url_template.strip(), description.strip()))
+
+    existing_id = None
+    if template_id:
+        cursor.execute("SELECT id FROM custom_search_templates WHERE id = ?", (template_id.strip(),))
+        row = cursor.fetchone()
+        if row:
+            existing_id = row["id"]
+    if not existing_id:
+        cursor.execute("SELECT id FROM custom_search_templates WHERE url_template = ?", (cleaned_tpl,))
+        row = cursor.fetchone()
+        if row:
+            existing_id = row["id"]
+
+    final_id = (template_id.strip() if template_id else None) or existing_id or f"tpl-{uuid.uuid4().hex[:8]}"
+    if existing_id:
+        cursor.execute(
+            """
+            UPDATE custom_search_templates
+            SET name = ?, url_template = ?, description = ?, is_enabled = ?
+            WHERE id = ?
+            """,
+            (cleaned_name, cleaned_tpl, cleaned_desc, enabled_int, existing_id),
+        )
+        final_id = existing_id
+    else:
+        cursor.execute(
+            """
+            INSERT INTO custom_search_templates (id, name, url_template, description, is_enabled)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (final_id, cleaned_name, cleaned_tpl, cleaned_desc, enabled_int),
+        )
+
     conn.commit()
     conn.close()
     return {
-        "id": tpl_id,
-        "name": name.strip(),
-        "url_template": url_template.strip(),
-        "description": description.strip(),
-        "is_enabled": 1
+        "id": final_id,
+        "name": cleaned_name,
+        "url_template": cleaned_tpl,
+        "description": cleaned_desc,
+        "is_enabled": enabled_int,
     }
+
 
 def delete_search_template(tpl_id: str) -> bool:
     conn = get_db_connection()

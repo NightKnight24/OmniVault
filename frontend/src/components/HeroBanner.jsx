@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Download, Star, Sparkles, Film, ArrowRight, Gamepad2 } from 'lucide-react';
+import { Search, Download, Star, Sparkles, Gamepad2 } from 'lucide-react';
 
 const formatSize = (mb) => {
   if (!mb || mb <= 0) return 'ROM';
@@ -118,8 +118,8 @@ export default function HeroBanner({ game, onSelectGame, onQuickDownload }) {
               onClick={() => onSelectGame(game)}
               className="flex items-center gap-2.5 px-6 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-sm shadow-glow-cyan transition-all hover:scale-105 active:scale-95 cursor-pointer"
             >
-              <Film className="w-4 h-4 text-black" />
-              <span>Watch Trailer & Details</span>
+              <Search className="w-4 h-4 text-black" />
+              <span>Find Mirrors & Details</span>
             </button>
 
             <button

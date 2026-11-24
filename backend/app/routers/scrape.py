@@ -26,8 +26,7 @@ async def search_online_sources(payload: Dict[str, Any] = Body(...)):
     if not query:
         raise HTTPException(status_code=400, detail="Search query is required")
         
-    # Concurrently search both Torznab / BitTorrent & Archive providers AND all mirror sites
-    # (r-roms, BlueRoms, ConsoleRoms, RomsGames, RomsFun, RomsLab, Ziperto, Vimm's Lair)
+    # Concurrently search both user-configured Torznab / Torrent feeds AND BYOS mirror sources
     prov_task = search_all_providers(query, platform=platform, limit=12)
     mirror_task = mirror_resolver.search_all_sources(query, platform=platform, limit_per_source=4)
     
@@ -171,10 +170,10 @@ async def trigger_full_library_scrape(payload: Dict[str, Any] = Body(default={})
 @router.post("/scan-local-collection")
 async def scan_local_collection():
     """
-    Scans /Volumes/ROMS across all console folders (NES, SNES, N64, GB, GBC, GBA,
-    NDS, 3DS, GameCube, Wii, Wii U, Switch, PSP, PS1, PS2, PS3, PS4, PSVita, Xbox, Xbox 360, etc.),
-    scrapes full metadata (box art, genre, release year, description, video trailers),
-    and imports them into vault.db so the entire collection is instantly playable across all emulators.
+    Scans the configured ROMs directory across all console & desktop folders (NES, SNES, N64, GB, GBC, GBA,
+    NDS, 3DS, GameCube, Wii, Wii U, Switch, Switch 2, PSP, PS1, PS2, PS3, PS4, PS5, PSVita, Xbox, Xbox 360,
+    Windows, macOS, etc.), scrapes full metadata (box art, genre, release year, description),
+    and imports them into vault.db so your local ROM archive is indexed and searchable.
     """
     import os
     import re
@@ -187,10 +186,11 @@ async def scan_local_collection():
         raise HTTPException(status_code=404, detail=f"ROMs directory not found: {roms_dir}")
 
     valid_exts = {
-        ".zip", ".7z", ".sfc", ".smc", ".nes", ".z64", ".n64", ".v64",
+        ".zip", ".7z", ".rar", ".sfc", ".smc", ".nes", ".z64", ".n64", ".v64",
         ".gba", ".gb", ".gbc", ".nds", ".dsi", ".iso", ".chd", ".rvz", ".cso", ".gcm",
         ".pce", ".sms", ".gg", ".a26", ".a78", ".md", ".gen", ".bin", ".cue", ".pbp",
-        ".3ds", ".cia", ".vpk", ".pkg", ".nsp", ".xci", ".wux", ".wud", ".rpx", ".xbe", ".xex"
+        ".3ds", ".cia", ".vpk", ".pkg", ".nsp", ".xci", ".wux", ".wud", ".rpx", ".xbe", ".xex",
+        ".dmg", ".exe", ".msi", ".toast", ".img"
     }
 
     conn = get_db_connection()
@@ -239,7 +239,7 @@ async def scan_local_collection():
                             game_id, clean_title, raw_stem.lower().replace(" ", "-"),
                             platform, platform, meta.get("genre", "Classic"),
                             meta.get("release_year") or None, meta.get("developer"), meta.get("publisher"),
-                            0.0, 0, meta.get("description", f"Local ROM of {clean_title} ready for immediate emulation."),
+                            0.0, 0, meta.get("description", "Locally archived ROM file."),
                             meta.get("box_art_2d", ""), meta.get("box_art_3d", ""),
                             meta.get("backdrop", ""), meta.get("trailer_url", ""),
                             screenshots_json, f"file://{rom_file}", "", size_mb, rom_file.suffix, 0

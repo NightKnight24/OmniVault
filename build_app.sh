@@ -1,18 +1,27 @@
 #!/usr/bin/env bash
 set -e
 
-APP_DIR="/Volumes/ROMS/OmniVault.app"
+SOURCE_DIR="${SOURCE_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+if [ -z "${APP_DIR:-}" ]; then
+    if [ -d "/Volumes/ROMS" ] && [ -w "/Volumes/ROMS" ]; then
+        APP_DIR="/Volumes/ROMS/OmniVault.app"
+    else
+        APP_DIR="$SOURCE_DIR/build/OmniVault.app"
+    fi
+fi
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
-SOURCE_DIR="/Volumes/ROMS/OmniVault-Source"
 
-echo "=== Building Native macOS OmniVault.app on /Volumes/ROMS ==="
+echo "=== Building Native macOS OmniVault.app -> $APP_DIR ==="
 
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 # 1. Build & copy frontend into Resources
 echo "-> Building & Packaging Frontend Assets & Brand Icon..."
+if [ ! -d "$SOURCE_DIR/frontend/node_modules" ]; then
+    (cd "$SOURCE_DIR/frontend" && npm ci)
+fi
 (cd "$SOURCE_DIR/frontend" && npm run build)
 mkdir -p "$RESOURCES_DIR/frontend"
 rm -rf "$RESOURCES_DIR/frontend/dist"
@@ -27,11 +36,29 @@ mkdir -p "$RESOURCES_DIR/backend"
 rm -rf "$RESOURCES_DIR/backend/app" "$RESOURCES_DIR/backend/data"
 cp -R "$SOURCE_DIR/backend/app" "$RESOURCES_DIR/backend/app"
 cp -R "$SOURCE_DIR/backend/data" "$RESOURCES_DIR/backend/data"
+if [ ! -f "$RESOURCES_DIR/backend/data/vault.db" ] && [ -f "$RESOURCES_DIR/backend/data/vault.db.gz" ]; then
+    echo "-> Decompressing bundled catalog vault.db.gz..."
+    gzip -dk "$RESOURCES_DIR/backend/data/vault.db.gz"
+fi
 cp -R "$SOURCE_DIR/backend/pyproject.toml" "$RESOURCES_DIR/backend/"
 cp -R "$SOURCE_DIR/backend/README.md" "$RESOURCES_DIR/backend/"
 
 # Ensure bundled standalone Python runtime is present & up to date
-STANDALONE_PY_SRC="$(find "$HOME/.local/share/uv/python" -type d -name "cpython-3.14*-macos-aarch64-none" -print -quit 2>/dev/null || true)"
+STANDALONE_PY_SRC="${STANDALONE_PY_SRC:-}"
+if [ -z "$STANDALONE_PY_SRC" ]; then
+    for search_dir in "${UV_PYTHON_INSTALL_DIR:-}" "$HOME/.local/share/uv/python"; do
+        if [ -n "$search_dir" ] && [ -d "$search_dir" ]; then
+            STANDALONE_PY_SRC="$(find "$search_dir" -maxdepth 2 -type d -name "cpython-3.14*-macos-aarch64-none" -print -quit 2>/dev/null || true)"
+            [ -n "$STANDALONE_PY_SRC" ] && break
+        fi
+    done
+fi
+if [ -z "$STANDALONE_PY_SRC" ] && command -v uv >/dev/null 2>&1; then
+    PY_BIN_FOUND="$(uv python find 3.14 2>/dev/null || true)"
+    if [ -n "$PY_BIN_FOUND" ] && [ -e "$PY_BIN_FOUND" ]; then
+        STANDALONE_PY_SRC="$(cd "$(dirname "$PY_BIN_FOUND")/.." && pwd)"
+    fi
+fi
 if [ ! -d "$RESOURCES_DIR/python" ]; then
     echo "-> Packaging Bundled Standalone Python runtime..."
     if [ -n "$STANDALONE_PY_SRC" ] && [ -d "$STANDALONE_PY_SRC" ]; then
@@ -44,7 +71,7 @@ fi
 
 echo "-> Installing/verifying all backend dependencies in bundled runtime..."
 uv pip install --python "$RESOURCES_DIR/python/bin/python3" --break-system-packages \
-    fastapi "uvicorn[standard]" httpx pydantic python-multipart beautifulsoup4 llama-cpp-python
+    fastapi "uvicorn[standard]" httpx pydantic python-multipart beautifulsoup4
 
 # Sanitize dylib ID and sysconfig paths for complete relocation portability & privacy
 if [ -f "$RESOURCES_DIR/python/lib/libpython3.14.dylib" ]; then
@@ -95,9 +122,9 @@ cat << 'EOF' > "$CONTENTS_DIR/Info.plist"
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.2</string>
+    <string>2.0.0</string>
     <key>CFBundleVersion</key>
-    <string>3</string>
+    <string>5</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
@@ -105,11 +132,11 @@ cat << 'EOF' > "$CONTENTS_DIR/Info.plist"
     <key>NSRequiresAquaSystemAppearance</key>
     <false/>
     <key>NSRemovableVolumesUsageDescription</key>
-    <string>OmniVault accesses your external drive to load your ROM library, emulators, and save states.</string>
+    <string>OmniVault accesses your external drive to save and index downloaded ROMs.</string>
     <key>NSDownloadsFolderUsageDescription</key>
-    <string>OmniVault accesses Downloads to import ROMs, BIOS files, and patches.</string>
+    <string>OmniVault accesses Downloads to manage and import ROM archives.</string>
     <key>NSDocumentsFolderUsageDescription</key>
-    <string>OmniVault accesses Documents to manage your retro game folders and save backups.</string>
+    <string>OmniVault accesses Documents to manage your ROM download folders.</string>
     <key>NSDesktopFolderUsageDescription</key>
     <string>OmniVault accesses Desktop to import game files.</string>
     <key>NSAppTransportSecurity</key>
@@ -126,15 +153,13 @@ echo "-> Compiling Native macOS Binary (OmniVault)..."
 cat << 'EOF' > /tmp/OmniVaultMain.swift
 import Cocoa
 import WebKit
-import GameController
 import SQLite3
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKScriptMessageHandler {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     var window: NSWindow!
     var webView: WKWebView!
     var serverProcess: Process?
     let port = 19842
-    var lastToggleTime: TimeInterval = 0
     var isLoaded = false
     var lastLeftMouseDownEvent: NSEvent?
     
@@ -213,6 +238,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         webView = WKWebView(frame: initialBounds, configuration: config)
         webView.underPageBackgroundColor = darkBg
         webView.navigationDelegate = self
+        webView.uiDelegate = self
         
         if #available(macOS 13.3, *) {
             webView.isInspectable = true
@@ -233,7 +259,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         NSApp.activate(ignoringOtherApps: true)
         
         showSplashScreen()
-        setupGlobalQuickMenuMonitors()
         cleanupOrphanedServer()
         startBackendServer()
         pollServerAndLoad()
@@ -303,18 +328,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         syncWebViewport()
     }
     
-    func resolveCatalogCount() -> String {
-        var count = 67594
-        var candidates: [String] = []
+    func resolveCatalogCount() -> Int {
         let appSupportDB = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Application Support/OmniVault/data/vault.db")
-        candidates.append(appSupportDB)
-        if let resourcePath = Bundle.main.resourcePath {
-            candidates.append((resourcePath as NSString).appendingPathComponent("backend/data/vault.db"))
+        if FileManager.default.fileExists(atPath: appSupportDB) {
+            var db: OpaquePointer?
+            if sqlite3_open_v2(appSupportDB, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK ||
+               sqlite3_open_v2(appSupportDB, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK {
+                defer { sqlite3_close(db) }
+                sqlite3_busy_timeout(db, 1500)
+                var stmt: OpaquePointer?
+                if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM games;", -1, &stmt, nil) == SQLITE_OK {
+                    defer { sqlite3_finalize(stmt) }
+                    if sqlite3_step(stmt) == SQLITE_ROW {
+                        let dbCount = Int(sqlite3_column_int64(stmt, 0))
+                        if dbCount > 0 {
+                            return dbCount
+                        }
+                    }
+                }
+            }
         }
-        for dbPath in candidates {
-            if FileManager.default.fileExists(atPath: dbPath) {
+        if let resourcePath = Bundle.main.resourcePath {
+            let bundledDB = (resourcePath as NSString).appendingPathComponent("backend/data/vault.db")
+            if FileManager.default.fileExists(atPath: bundledDB) {
+                let encoded = bundledDB.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? bundledDB
+                let uri = "file:\(encoded)?immutable=1"
                 var db: OpaquePointer?
-                if sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK {
+                if sqlite3_open_v2(uri, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK {
                     defer { sqlite3_close(db) }
                     var stmt: OpaquePointer?
                     if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM games;", -1, &stmt, nil) == SQLITE_OK {
@@ -322,21 +362,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
                         if sqlite3_step(stmt) == SQLITE_ROW {
                             let dbCount = Int(sqlite3_column_int64(stmt, 0))
                             if dbCount > 0 {
-                                count = dbCount
-                                break
+                                return dbCount
                             }
                         }
                     }
                 }
             }
         }
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        return formatter.string(from: NSNumber(value: count)) ?? "\(count)"
+        return 0
     }
 
     func showSplashScreen() {
-        let formattedCount = resolveCatalogCount()
+        let rawCount = resolveCatalogCount()
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        let badgeText: String
+        if rawCount > 0 {
+            let formattedCount = formatter.string(from: NSNumber(value: rawCount)) ?? "\(rawCount)"
+            badgeText = "\(formattedCount) Catalog Titles"
+        } else {
+            badgeText = "Initializing Vault Catalog..."
+        }
         let splashHTML = """
         <!DOCTYPE html>
         <html>
@@ -412,8 +458,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
             <div class="spinner"></div>
           </div>
           <h1>OmniVault</h1>
-          <p id="boot-status">Booting Neural Retro Engine & Catalog...</p>
-          <div class="badge">\(formattedCount) Preserved Titles</div>
+          <p id="boot-status">Starting ROM Finder & Download Manager...</p>
+          <div class="badge">\(badgeText)</div>
         </body>
         </html>
         """
@@ -472,6 +518,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         env["PYTHONPATH"] = backendDir
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONDONTWRITEBYTECODE"] = "1"
+        if FileManager.default.fileExists(atPath: "/etc/ssl/cert.pem") {
+            env["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"
+            env["REQUESTS_CA_BUNDLE"] = "/etc/ssl/cert.pem"
+        }
         process.environment = env
         
         if let fileHandle = try? FileHandle(forWritingTo: logUrl) {
@@ -550,6 +600,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
         }
     }
     
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
+            NSWorkspace.shared.open(url)
+        }
+        return nil
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         if let dict = message.body as? [String: Any], let action = dict["action"] as? String {
             if action == "startWindowDrag" {
@@ -562,101 +619,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigati
                 DispatchQueue.main.async {
                     self.window.zoom(nil)
                 }
-            } else if action == "closeQuickMenu" || action == "quitGame" {
-                DispatchQueue.main.async {
-                    self.window.level = .normal
-                    NSApp.activate(ignoringOtherApps: true)
-                    self.window.makeKeyAndOrderFront(nil)
-                }
-            }
-        }
-    }
-
-    func triggerQuickMenuOverlay(fromBackground: Bool) {
-        let now = Date().timeIntervalSince1970
-        if now - lastToggleTime < 0.35 { return }
-        lastToggleTime = now
-        
-        DispatchQueue.main.async {
-            self.window.level = .floating
-            if fromBackground || !NSApp.isActive {
-                NSApp.activate(ignoringOtherApps: true)
-                self.window.makeKeyAndOrderFront(nil)
-            }
-            self.webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('omnivault-toggle-quickmenu'));", completionHandler: nil)
-        }
-    }
-    
-    func bindController(_ controller: GCController) {
-        guard let gamepad = controller.extendedGamepad else { return }
-        
-        gamepad.buttonHome?.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed {
-                self?.triggerQuickMenuOverlay(fromBackground: true)
-            }
-        }
-        
-        gamepad.buttonMenu.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed, gamepad.buttonOptions?.isPressed == true {
-                self?.triggerQuickMenuOverlay(fromBackground: true)
-            }
-        }
-
-        gamepad.buttonOptions?.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed, gamepad.buttonMenu.isPressed {
-                self?.triggerQuickMenuOverlay(fromBackground: true)
-            }
-        }
-
-        gamepad.leftThumbstickButton?.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed, gamepad.rightThumbstickButton?.isPressed == true {
-                self?.triggerQuickMenuOverlay(fromBackground: true)
-            }
-        }
-
-        gamepad.rightThumbstickButton?.pressedChangedHandler = { [weak self] _, _, pressed in
-            if pressed, gamepad.leftThumbstickButton?.isPressed == true {
-                self?.triggerQuickMenuOverlay(fromBackground: true)
-            }
-        }
-    }
-    
-    func setupGlobalQuickMenuMonitors() {
-        GCController.shouldMonitorBackgroundEvents = true
-        for controller in GCController.controllers() {
-            bindController(controller)
-        }
-        NotificationCenter.default.addObserver(
-            forName: .GCControllerDidConnect,
-            object: nil,
-            queue: .main
-        ) { [weak self] note in
-            if let ctrl = note.object as? GCController {
-                self?.bindController(ctrl)
-            }
-        }
-        GCController.startWirelessControllerDiscovery(completionHandler: nil)
-        
-        // High-frequency polling timer for background gamepad combo detection
-        Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            for ctrl in GCController.controllers() {
-                guard let gp = ctrl.extendedGamepad else { continue }
-                let home = gp.buttonHome?.isPressed ?? false
-                let start = gp.buttonMenu.isPressed
-                let select = gp.buttonOptions?.isPressed ?? false
-                let l3 = gp.leftThumbstickButton?.isPressed ?? false
-                let r3 = gp.rightThumbstickButton?.isPressed ?? false
-                
-                if home || (start && select) || (l3 && r3) {
-                    self?.triggerQuickMenuOverlay(fromBackground: true)
-                    break
-                }
-            }
-        }
-        
-        NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 122 || (event.keyCode == 53 && event.modifierFlags.contains(.command)) { // F1 or Cmd+Esc
-                self?.triggerQuickMenuOverlay(fromBackground: true)
             }
         }
     }
@@ -687,8 +649,8 @@ rm -f /tmp/OmniVaultMain.swift
 echo "-> Signing macOS App Bundle (binding Info.plist & entitlements)..."
 xattr -cr "$APP_DIR" 2>/dev/null || true
 find "$RESOURCES_DIR/python" -type f \( -name "*.dylib" -o -name "*.so" -o -name "python3.14" \) -exec codesign --force --sign - {} \; 2>/dev/null || true
-find "$RESOURCES_DIR/backend" -type f \( -name "*.dylib" -o -name "*.so" -o -name "macos_ocr" \) -exec codesign --force --sign - {} \; 2>/dev/null || true
+find "$RESOURCES_DIR/backend" -type f \( -name "*.dylib" -o -name "*.so" \) -exec codesign --force --sign - {} \; 2>/dev/null || true
 codesign --force --sign - "$MACOS_DIR/OmniVault"
 codesign --force --sign - "$APP_DIR"
 
-echo "=== Successfully Synced /Volumes/ROMS/OmniVault.app! ==="
+echo "=== Successfully Synced $APP_DIR! ==="

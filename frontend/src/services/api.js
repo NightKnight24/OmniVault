@@ -11,7 +11,7 @@ export async function fetchGames(params = {}) {
   if (params.pageSize) query.set('page_size', params.pageSize);
   if (params.featured_only) query.set('featured_only', 'true');
   if (params.favorites_only) query.set('favorites_only', 'true');
-  
+
   const res = await fetch(`${API_BASE}/games?${query.toString()}`);
   if (!res.ok) throw new Error('Failed to fetch games');
   return res.json();
@@ -23,12 +23,6 @@ export async function fetchGame(id) {
   return res.json();
 }
 export const fetchGameById = fetchGame;
-
-export async function fetchGameVideo(gameId, mode = 'gameplay') {
-  const res = await fetch(`${API_BASE}/games/${gameId}/video?mode=${mode}`);
-  if (!res.ok) throw new Error('Failed to fetch video');
-  return res.json();
-}
 
 export async function fetchPlatforms() {
   const res = await fetch(`${API_BASE}/games/meta/platforms`);
@@ -52,25 +46,13 @@ export async function fetchGenres(platform = 'ALL', family = 'ALL') {
   return res.json();
 }
 
-export async function fetchGameCheats(gameId) {
-  const res = await fetch(`${API_BASE}/games/${gameId}/cheats`);
-  if (!res.ok) throw new Error('Failed to fetch cheats');
-  return res.json();
-}
-
-export async function fetchGamePatchesAndMods(gameId) {
-  const res = await fetch(`${API_BASE}/games/${gameId}/patches-mods`);
-  if (!res.ok) throw new Error('Failed to fetch patches and mods');
-  return res.json();
-}
-
-export async function exportGameCheats(gameId) {
-  const res = await fetch(`${API_BASE}/games/${gameId}/export-cheats`, {
+export async function setGameSource(gameId, payload) {
+  const res = await fetch(`${API_BASE}/games/${gameId}/set-source`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
+    body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Failed to export cheats');
+  if (!res.ok) throw new Error('Failed to save custom source link');
   return res.json();
 }
 
@@ -90,17 +72,16 @@ export async function importScrapedGame(game) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(game),
   });
-  if (!res.ok) throw new Error('Failed to import game to store');
+  if (!res.ok) throw new Error('Failed to import game to catalog');
   return res.json();
 }
 
-export async function populateAllLibraries(limit = 300) {
-  const res = await fetch(`${API_BASE}/scrape/populate-all`, {
+export async function scanLocalCollection() {
+  const res = await fetch(`${API_BASE}/scrape/scan-local-collection`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ limit }),
   });
-  if (!res.ok) throw new Error('Failed to scrape full libraries');
+  if (!res.ok) throw new Error('Failed to scan local ROM collection');
   return res.json();
 }
 
@@ -112,17 +93,7 @@ export async function fetchDownloads() {
 
 export async function fetchInstalledGames() {
   const res = await fetch(`${API_BASE}/downloads/installed`);
-  if (!res.ok) throw new Error('Failed to fetch installed games');
-  return res.json();
-}
-
-export async function launchInstalledGame(path) {
-  const res = await fetch(`${API_BASE}/downloads/launch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path }),
-  });
-  if (!res.ok) throw new Error('Failed to launch game');
+  if (!res.ok) throw new Error('Failed to fetch downloaded ROMs');
   return res.json();
 }
 
@@ -132,20 +103,30 @@ export async function deleteInstalledGame(path) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path }),
   });
-  if (!res.ok) throw new Error('Failed to delete game');
+  if (!res.ok) throw new Error('Failed to delete file');
   return res.json();
 }
 
-export async function startDownload(gameId, type = 'direct', directUrl = null, filename = null) {
+export async function startDownload(
+  gameId,
+  type = 'direct',
+  directUrl = null,
+  filename = null,
+  destinationTarget = null
+) {
   const payload = { game_id: gameId, type };
   if (directUrl) payload.direct_url = directUrl;
   if (filename) payload.filename = filename;
+  if (destinationTarget) payload.destination_target = destinationTarget;
   const res = await fetch(`${API_BASE}/downloads/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Failed to start download');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to start download');
+  }
   return res.json();
 }
 
@@ -157,6 +138,16 @@ export async function revealInFinder(downloadId) {
   return res.json();
 }
 
+export async function revealLocalPath(path) {
+  const res = await fetch(`${API_BASE}/downloads/open-path`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) throw new Error('Failed to reveal path in Finder');
+  return res.json();
+}
+
 export async function cancelDownload(downloadId) {
   const res = await fetch(`${API_BASE}/downloads/${downloadId}`, {
     method: 'DELETE',
@@ -165,19 +156,31 @@ export async function cancelDownload(downloadId) {
   return res.json();
 }
 
-export async function chatWithAI(message, history = []) {
-  const res = await fetch(`${API_BASE}/ai/chat`, {
+export async function moveQueuedDownload(downloadId, direction = 'up') {
+  const res = await fetch(`${API_BASE}/downloads/${downloadId}/move`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, history }),
+    body: JSON.stringify({ direction }),
   });
-  if (!res.ok) throw new Error('AI assistant unavailable');
+  if (!res.ok) throw new Error('Failed to reorder download queue');
   return res.json();
 }
 
-export async function fetchAISuggestions() {
-  const res = await fetch(`${API_BASE}/ai/suggestions`);
-  if (!res.ok) throw new Error('Failed to fetch AI suggestions');
+export async function pauseDownloadQueue() {
+  const res = await fetch(`${API_BASE}/downloads/queue/pause`, { method: 'POST' });
+  if (!res.ok) throw new Error('Failed to pause queue');
+  return res.json();
+}
+
+export async function resumeDownloadQueue() {
+  const res = await fetch(`${API_BASE}/downloads/queue/resume`, { method: 'POST' });
+  if (!res.ok) throw new Error('Failed to resume queue');
+  return res.json();
+}
+
+export async function clearCompletedDownloads() {
+  const res = await fetch(`${API_BASE}/downloads/clear-completed`, { method: 'POST' });
+  if (!res.ok) throw new Error('Failed to clear finished downloads');
   return res.json();
 }
 
@@ -314,190 +317,174 @@ export async function deleteSearchTemplate(templateId) {
   return res.json();
 }
 
-// =========================================================================
-// Advanced Cheat Engineering Lab APIs
-// =========================================================================
-
-export async function diffSaves(formData) {
-  const res = await fetch(`${API_BASE}/cheats-engine/save/diff`, {
-    method: 'POST',
-    body: formData,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to compare save files');
-  }
+export async function fetchRealDebridConfig() {
+  const res = await fetch(`${API_BASE}/providers/realdebrid`);
+  if (!res.ok) throw new Error('Failed to fetch Real-Debrid config');
   return res.json();
 }
 
-export async function searchSave(formData) {
-  const res = await fetch(`${API_BASE}/cheats-engine/save/search`, {
-    method: 'POST',
-    body: formData,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to search save file');
-  }
-  return res.json();
-}
-
-export async function patchSave(payload) {
-  const res = await fetch(`${API_BASE}/cheats-engine/save/patch`, {
+export async function saveRealDebridConfig(payload) {
+  const res = await fetch(`${API_BASE}/providers/realdebrid`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to safely patch save file');
+    throw new Error(err.detail || 'Failed to validate Real-Debrid token');
   }
   return res.json();
 }
 
-export async function fetchSaveBackups(path) {
-  const res = await fetch(`${API_BASE}/cheats-engine/save/backups?path=${encodeURIComponent(path)}`);
-  if (!res.ok) throw new Error('Failed to load save backups');
-  return res.json();
-}
-
-export async function revertSave(path, backup_path) {
-  const res = await fetch(`${API_BASE}/cheats-engine/save/revert`, {
+export async function testRealDebridConnection(apiKey = '') {
+  const res = await fetch(`${API_BASE}/providers/realdebrid/test`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path, backup_path }),
+    body: JSON.stringify({ api_key: apiKey }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to restore save backup');
-  }
+  if (!res.ok) throw new Error('Failed to test Real-Debrid token');
   return res.json();
 }
 
-export async function fetchRetroArchStatus() {
-  const res = await fetch(`${API_BASE}/cheats-engine/retroarch/status`);
-  if (!res.ok) throw new Error('Failed to query RetroArch status');
+export async function fetchTheGamesDbConfig() {
+  const res = await fetch(`${API_BASE}/providers/thegamesdb`);
+  if (!res.ok) throw new Error('Failed to fetch TheGamesDB config');
   return res.json();
 }
 
-export async function scanRetroArchRam(payload) {
-  const res = await fetch(`${API_BASE}/cheats-engine/retroarch/scan`, {
+export async function saveTheGamesDbConfig(payload) {
+  const res = await fetch(`${API_BASE}/providers/thegamesdb`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
+  if (!res.ok) throw new Error('Failed to save TheGamesDB config');
+  return res.json();
+}
+
+export async function testTheGamesDbKey(apiKey = '') {
+  const res = await fetch(`${API_BASE}/providers/thegamesdb/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: apiKey }),
+  });
+  if (!res.ok) throw new Error('Failed to test TheGamesDB key');
+  return res.json();
+}
+
+export async function syncTheGamesDbPlatform(platform = 'Switch2', maxPages = 3, startPage = 1) {
+  const res = await fetch(`${API_BASE}/providers/thegamesdb/sync-platform`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ platform, max_pages: maxPages, start_page: startPage }),
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to scan RetroArch RAM');
+    throw new Error(err.detail || 'Failed to sync platform from TheGamesDB');
   }
   return res.json();
 }
 
-export async function pokeRetroArchRam(payload) {
-  const res = await fetch(`${API_BASE}/cheats-engine/retroarch/poke`, {
+export async function syncAllTheGamesDbPlatforms(scope = 'all', pagesPerPlatform = 1, useStaticDump = true) {
+  const res = await fetch(`${API_BASE}/providers/thegamesdb/sync-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      scope,
+      pages_per_platform: pagesPerPlatform,
+      use_static_dump: useStaticDump,
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to poke live RAM');
+    throw new Error(err.detail || 'Failed to sync platforms from TheGamesDB');
   }
   return res.json();
 }
 
-export async function freezeRetroArchRam(payload) {
-  const res = await fetch(`${API_BASE}/cheats-engine/retroarch/freeze`, {
+export async function enrichGameTheGamesDb(gameId) {
+  const res = await fetch(`${API_BASE}/games/${gameId}/enrich-tgdb`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to freeze live RAM');
+    throw new Error(err.detail || 'Failed to refresh metadata from TheGamesDB');
   }
   return res.json();
 }
 
-export async function unfreezeRetroArchRam(payload) {
-  const res = await fetch(`${API_BASE}/cheats-engine/retroarch/unfreeze`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error('Failed to unfreeze RAM');
-  return res.json();
-}
-
-export async function analyzeRomCheats(formData) {
-  const res = await fetch(`${API_BASE}/cheats-engine/rom/analyze`, {
-    method: 'POST',
-    body: formData,
-  });
+export async function getGameVideos(gameId) {
+  const res = await fetch(`${API_BASE}/games/${gameId}/videos`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to analyze ROM for cheats');
+    throw new Error(err.detail || 'Failed to load game videos');
   }
   return res.json();
 }
 
 // =========================================================================
-// Live AI Screen & Audio Translation APIs
+// Multi-Source ROM Mirror & Scraper Network APIs (BYOS)
 // =========================================================================
 
-export async function translateFrame(imageBase64 = null, voice = false) {
-  const formData = new FormData();
-  if (imageBase64) {
-    formData.append('image_base64', imageBase64);
-  }
-  formData.append('voice', voice ? 'true' : 'false');
-  
-  const res = await fetch(`${API_BASE}/ai/translate-frame`, {
-    method: 'POST',
-    body: formData,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Live translation failed');
-  }
-  return res.json();
-}
-
-export async function fetchRetroArchAiConfig() {
-  const res = await fetch(`${API_BASE}/ai/retroarch-config`);
-  if (!res.ok) throw new Error('Failed to fetch RetroArch AI config');
-  return res.json();
-}
-
-export async function speakText(text) {
-  const res = await fetch(`${API_BASE}/ai/speak`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
-  });
-  if (!res.ok) throw new Error('Failed to synthesize speech');
-  const blob = await res.blob();
-  const audioUrl = URL.createObjectURL(blob);
-  const audio = new Audio(audioUrl);
-  audio.play();
-  return audio;
-}
-
-// =========================================================================
-// Multi-Source ROM Scraper & Mirror Network APIs
-// =========================================================================
-
-export async function fetchMirrorSources() {
-  const res = await fetch(`${API_BASE}/mirrors/sources`);
+export async function fetchMirrorSources(ping = true) {
+  const res = await fetch(`${API_BASE}/mirrors/sources?ping=${ping ? 'true' : 'false'}`);
   if (!res.ok) throw new Error('Failed to fetch mirror sources');
   return res.json();
 }
 
-export async function searchMirrors(query, platform = null, sourceId = null) {
+export async function addMirrorSource(payload) {
+  const res = await fetch(`${API_BASE}/mirrors/sources`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to save mirror source');
+  }
+  return res.json();
+}
+
+export async function deleteMirrorSource(sourceId) {
+  const res = await fetch(`${API_BASE}/mirrors/sources/${sourceId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error('Failed to delete mirror source');
+  return res.json();
+}
+
+export async function toggleMirrorSource(sourceId) {
+  const res = await fetch(`${API_BASE}/mirrors/sources/${sourceId}/toggle`, {
+    method: 'PATCH',
+  });
+  if (!res.ok) throw new Error('Failed to toggle mirror source');
+  return res.json();
+}
+
+export async function importSourcePack(pack) {
+  const res = await fetch(`${API_BASE}/mirrors/import-pack`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(pack),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to import source pack');
+  }
+  return res.json();
+}
+
+export async function exportSourcePack() {
+  const res = await fetch(`${API_BASE}/mirrors/export-pack`);
+  if (!res.ok) throw new Error('Failed to export source pack');
+  return res.json();
+}
+
+export async function searchMirrors(query, platform = null, sourceId = null, strict = false) {
   const res = await fetch(`${API_BASE}/mirrors/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, platform, source_id: sourceId }),
+    body: JSON.stringify({ query, platform, source_id: sourceId, strict }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -506,17 +493,14 @@ export async function searchMirrors(query, platform = null, sourceId = null) {
   return res.json();
 }
 
-export async function getGameMirrors(gameId) {
-  const res = await fetch(`${API_BASE}/games/${gameId}/mirrors`);
+export async function getGameMirrors(gameId, sourceId = null) {
+  const qs = sourceId ? `?source_id=${encodeURIComponent(sourceId)}` : '';
+  const res = await fetch(`${API_BASE}/games/${gameId}/mirrors${qs}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || 'Failed to fetch game mirrors');
   }
   return res.json();
-}
-
-export async function getGameStreams(gameId) {
-  return getGameMirrors(gameId);
 }
 
 export async function findWorkingMirror(title, platform = 'Retro', failedUrl = null) {
@@ -542,6 +526,17 @@ export async function testMirrorSource(sourceId) {
   return res.json();
 }
 
+export async function testAllSources() {
+  const res = await fetch(`${API_BASE}/mirrors/test-all`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to test all sources');
+  }
+  return res.json();
+}
+
 export async function importAndDownloadMirror(payload) {
   const res = await fetch(`${API_BASE}/mirrors/import-and-download`, {
     method: 'POST',
@@ -552,297 +547,6 @@ export async function importAndDownloadMirror(payload) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || 'Failed to import and download from mirror');
   }
-  return res.json();
-}
-
-// =========================================================================
-// Native Emulator Management & Unified Settings APIs
-// =========================================================================
-
-export async function fetchEmulatorsStatus() {
-  const res = await fetch(`${API_BASE}/emulators/status`);
-  if (!res.ok) throw new Error('Failed to fetch emulators status');
-  return res.json();
-}
-
-export async function installEmulator(emulatorId) {
-  const res = await fetch(`${API_BASE}/emulators/install`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ emulator_id: emulatorId }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to install/update emulator');
-  }
-  return res.json();
-}
-
-export async function installAllEmulators() {
-  const res = await fetch(`${API_BASE}/emulators/install-all`, {
-    method: 'POST',
-  });
-  if (!res.ok) throw new Error('Failed to install all emulators');
-  return res.json();
-}
-
-export async function launchInNativeEmulator(path, platform = 'Retro', force = false) {
-  const res = await fetch(`${API_BASE}/emulators/launch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path, platform, force }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to launch in native emulator');
-  }
-  return res.json();
-}
-
-export async function checkPlatformBios(platform) {
-  const res = await fetch(`${API_BASE}/emulators/bios-check/${encodeURIComponent(platform)}`);
-  if (!res.ok) return { required: false, ready: true };
-  return res.json();
-}
-
-export async function fetchActiveSession() {
-  const res = await fetch(`${API_BASE}/emulators/active-session`);
-  if (!res.ok) return { session: null };
-  return res.json();
-}
-
-export async function syncEmulatorControllers() {
-  const res = await fetch(`${API_BASE}/emulators/sync-controllers`, { method: 'POST' });
-  if (!res.ok) return { status: 'error' };
-  return res.json();
-}
-
-export async function controlActiveEmulator(action, value = null) {
-  const res = await fetch(`${API_BASE}/emulators/control`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, value }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Emulator control failed');
-  }
-  return res.json();
-}
-
-export async function fetchEmulatorSettings() {
-  const res = await fetch(`${API_BASE}/emulators/settings`);
-  if (!res.ok) throw new Error('Failed to fetch emulator settings');
-  return res.json();
-}
-
-export async function saveEmulatorSettings(settings) {
-  const res = await fetch(`${API_BASE}/emulators/settings`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ settings }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to save emulator settings');
-  }
-  return res.json();
-}
-
-export async function fetchBiosStatus() {
-  const res = await fetch(`${API_BASE}/emulators/bios`);
-  if (!res.ok) throw new Error('Failed to fetch BIOS status');
-  return res.json();
-}
-
-export async function uploadBiosFile(file) {
-  const formData = new FormData();
-  formData.append('file', file);
-  const res = await fetch(`${API_BASE}/emulators/upload-bios`, {
-    method: 'POST',
-    body: formData,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to upload BIOS file');
-  }
-  return res.json();
-}
-
-export async function fetchSetupStatus() {
-  const res = await fetch(`${API_BASE}/emulators/setup-status`);
-  if (!res.ok) throw new Error('Failed to fetch setup status');
-  return res.json();
-}
-
-export async function completeSetup(payload) {
-  const res = await fetch(`${API_BASE}/emulators/complete-setup`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to complete initial setup');
-  }
-  return res.json();
-}
-
-export async function openEmulatorFolder(folder = 'emulators') {
-  const res = await fetch(`${API_BASE}/emulators/open-folder`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ folder }),
-  });
-  if (!res.ok) throw new Error('Failed to open folder');
-  return res.json();
-}
-
-// =========================================================================
-// Themes & AI Theme Studio APIs
-// =========================================================================
-
-export async function fetchThemes() {
-  const res = await fetch(`${API_BASE}/themes`);
-  if (!res.ok) throw new Error('Failed to fetch themes');
-  return res.json();
-}
-
-export async function saveTheme(payload) {
-  const res = await fetch(`${API_BASE}/themes`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to save theme');
-  }
-  return res.json();
-}
-
-export async function activateTheme(themeId) {
-  const res = await fetch(`${API_BASE}/themes/${themeId}/activate`, {
-    method: 'POST',
-  });
-  if (!res.ok) throw new Error('Failed to activate theme');
-  return res.json();
-}
-
-export async function deleteTheme(themeId) {
-  const res = await fetch(`${API_BASE}/themes/${themeId}`, {
-    method: 'DELETE',
-  });
-  if (!res.ok) throw new Error('Failed to delete theme');
-  return res.json();
-}
-
-export async function generateAITheme(prompt) {
-  const res = await fetch(`${API_BASE}/themes/generate-ai`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to generate AI theme');
-  }
-  return res.json();
-}
-
-// =========================================================================
-// RetroAchievements Universal Trophy APIs
-// =========================================================================
-
-export async function fetchAchievementsConfig() {
-  const res = await fetch(`${API_BASE}/achievements/config`);
-  if (!res.ok) throw new Error('Failed to fetch achievements config');
-  return res.json();
-}
-
-export async function saveAchievementsConfig(payload) {
-  const res = await fetch(`${API_BASE}/achievements/config`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error('Failed to save achievements config');
-  return res.json();
-}
-
-export async function fetchGameAchievements(gameId) {
-  const res = await fetch(`${API_BASE}/achievements/game/${gameId}`);
-  if (!res.ok) throw new Error('Failed to fetch game achievements');
-  return res.json();
-}
-
-export async function scanGameAchievements(gameId) {
-  const res = await fetch(`${API_BASE}/achievements/scan-progress/${gameId}`, {
-    method: 'POST'
-  });
-  if (!res.ok) throw new Error('Failed to scan game achievements');
-  return res.json();
-}
-
-export async function unlockAchievement(payload) {
-  const res = await fetch(`${API_BASE}/achievements/unlock`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error('Failed to unlock achievement');
-  return res.json();
-}
-
-export async function fetchAchievementsSummary() {
-  const res = await fetch(`${API_BASE}/achievements/summary`);
-  if (!res.ok) throw new Error('Failed to fetch achievements summary');
-  return res.json();
-}
-
-// =========================================================================
-// OmniSync: Time-Machine Save States & Cloud APIs
-// =========================================================================
-
-export async function fetchSaveSnapshots(gameId) {
-  const res = await fetch(`${API_BASE}/saves/snapshots/${gameId}`);
-  if (!res.ok) throw new Error('Failed to fetch save snapshots');
-  return res.json();
-}
-
-export async function createSaveSnapshot(payload) {
-  const res = await fetch(`${API_BASE}/saves/create-snapshot`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error('Failed to create save snapshot');
-  return res.json();
-}
-
-export async function rollbackSaveSnapshot(payload) {
-  const res = await fetch(`${API_BASE}/saves/rollback`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error('Failed to rollback save snapshot');
-  return res.json();
-}
-
-export async function fetchCloudStatus() {
-  const res = await fetch(`${API_BASE}/saves/cloud-status`);
-  if (!res.ok) throw new Error('Failed to fetch cloud sync status');
-  return res.json();
-}
-
-export async function syncCloudSaves(payload = {}) {
-  const res = await fetch(`${API_BASE}/saves/sync-cloud`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error('Failed to sync cloud saves');
   return res.json();
 }
 
@@ -862,7 +566,10 @@ export async function convertRomFormat(payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Failed to compress ROM');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to compress ROM');
+  }
   return res.json();
 }
 
@@ -872,143 +579,16 @@ export async function buildM3UPlaylist(payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Failed to build M3U playlist');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to build M3U playlist');
+  }
   return res.json();
 }
 
 // =========================================================================
-// OmniNet: Couch P2P Netplay APIs
+// Storage, Setup & Directory Configuration APIs
 // =========================================================================
-
-export async function fetchNetplayLobbies() {
-  const res = await fetch(`${API_BASE}/netplay/lobbies`);
-  if (!res.ok) throw new Error('Failed to fetch netplay lobbies');
-  return res.json();
-}
-
-export async function createNetplayLobby(payload) {
-  const res = await fetch(`${API_BASE}/netplay/create`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error('Failed to create netplay lobby');
-  return res.json();
-}
-
-export async function joinNetplayLobby(payload) {
-  const res = await fetch(`${API_BASE}/netplay/join`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error('Failed to join netplay lobby');
-  return res.json();
-}
-
-// =========================================================================
-// OmniVault Mod & Romhack Storefront APIs
-// =========================================================================
-
-export async function fetchModsCatalog(category = null, platform = null) {
-  const params = new URLSearchParams();
-  if (category) params.append('category', category);
-  if (platform) params.append('platform', platform);
-  const res = await fetch(`${API_BASE}/mods/catalog?${params.toString()}`);
-  if (!res.ok) throw new Error('Failed to fetch mods catalog');
-  return res.json();
-}
-
-export async function fetchGameMods(gameId) {
-  const res = await fetch(`${API_BASE}/mods/game/${gameId}`);
-  if (!res.ok) throw new Error('Failed to fetch game mods');
-  return res.json();
-}
-
-export async function toggleGameMod(modId, enabled) {
-  const res = await fetch(`${API_BASE}/mods/toggle`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mod_id: modId, enabled }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to toggle mod');
-  }
-  return res.json();
-}
-
-export async function uploadCustomPatch(formData) {
-  const res = await fetch(`${API_BASE}/mods/upload-custom`, {
-    method: 'POST',
-    body: formData,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to upload custom patch');
-  }
-  return res.json();
-}
-
-export async function scrapeCommunityMods(query, platform = null) {
-  const params = new URLSearchParams({ query });
-  if (platform) params.append('platform', platform);
-  const res = await fetch(`${API_BASE}/mods/scrape-community?${params.toString()}`);
-  if (!res.ok) throw new Error('Failed to scrape community patches');
-  return res.json();
-}
-
-export async function autoInstallCommunityMod(payload) {
-  const res = await fetch(`${API_BASE}/mods/auto-install`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to auto-install patch');
-  }
-  return res.json();
-}
-
-export async function aiGenerateMod(payload) {
-  const res = await fetch(`${API_BASE}/mods/ai-generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to synthesize mod via AI');
-  }
-  return res.json();
-}
-
-export async function generateEmulatorPatches(payload) {
-  const res = await fetch(`${API_BASE}/mods/generate-emulator-patches`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to generate emulator patches');
-  }
-  return res.json();
-}
-
-export async function scanLocalCollection() {
-  const res = await fetch(`${API_BASE}/scrape/scan-local-collection`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  if (!res.ok) throw new Error('Failed to scan and scrape local ROM collection');
-  return res.json();
-}
-
-// ==========================================
-// STORAGE & DIRECTORY CONFIGURATION API
-// ==========================================
 
 export async function fetchStorageConfig() {
   const res = await fetch(`${API_BASE}/storage/config`);
@@ -1041,6 +621,25 @@ export async function applyQuickSetup() {
   return res.json();
 }
 
+export async function fetchSetupStatus() {
+  const res = await fetch(`${API_BASE}/storage/setup-status`);
+  if (!res.ok) throw new Error('Failed to fetch setup status');
+  return res.json();
+}
+
+export async function completeSetup(payload = {}) {
+  const res = await fetch(`${API_BASE}/storage/complete-setup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to complete initial setup');
+  }
+  return res.json();
+}
+
 export async function browseDirectory(defaultPath = null) {
   const res = await fetch(`${API_BASE}/storage/browse`, {
     method: 'POST',
@@ -1067,9 +666,31 @@ export async function fetchStorageVolumes() {
   return res.json();
 }
 
+export async function fetchCloudTargets() {
+  const res = await fetch(`${API_BASE}/storage/cloud-targets`);
+  if (!res.ok) throw new Error('Failed to fetch cloud storage targets');
+  return res.json();
+}
 
+export async function saveCloudTargets(payload) {
+  const res = await fetch(`${API_BASE}/storage/cloud-targets`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to save cloud storage settings');
+  }
+  return res.json();
+}
 
-
-
-
-
+export async function testCloudTarget(payload) {
+  const res = await fetch(`${API_BASE}/storage/cloud-targets/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Failed to test cloud target');
+  return res.json();
+}

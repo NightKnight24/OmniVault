@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Gamepad2, Layers, ChevronLeft, ChevronRight, Tv, Smartphone, Disc, Sparkles } from 'lucide-react';
+import { Gamepad2, Layers, ChevronLeft, ChevronRight, Tv, Smartphone, Disc, Sparkles, Monitor } from 'lucide-react';
 
 export const FAMILIES = [
   { id: 'ALL', label: 'All Systems', badge: 'ALL', icon: Layers },
@@ -7,11 +7,13 @@ export const FAMILIES = [
   { id: 'nintendo_home', label: 'Nintendo Home', badge: 'NIN-HOME', icon: Tv, color: 'border-red-500/40 text-red-400 bg-red-950/40' },
   { id: 'nintendo_handheld', label: 'Nintendo Handheld', badge: 'PORTABLE', icon: Smartphone, color: 'border-amber-500/40 text-amber-400 bg-amber-950/40' },
   { id: 'xbox', label: 'Xbox', badge: 'MICROSOFT', icon: Gamepad2, color: 'border-emerald-500/40 text-emerald-400 bg-emerald-950/40' },
+  { id: 'pc_desktop', label: 'PC & Mac', badge: 'PC / MAC', icon: Monitor, color: 'border-sky-500/40 text-sky-300 bg-sky-950/40' },
   { id: 'sega', label: 'Sega', badge: 'SEGA', icon: Sparkles, color: 'border-cyan-500/40 text-cyan-400 bg-cyan-950/40' },
   { id: 'arcade_retro', label: 'Arcade & Retro', badge: 'RETRO', icon: Disc, color: 'border-purple-500/40 text-purple-400 bg-purple-950/40' },
 ];
 
 export const ALL_PLATFORMS = [
+  { id: 'Switch2', label: 'Nintendo Switch 2', badge: 'NSW2', family: 'nintendo_home' },
   { id: 'Switch', label: 'Nintendo Switch', badge: 'NSW', family: 'nintendo_home' },
   { id: 'WiiU', label: 'Nintendo Wii U', badge: 'WIIU', family: 'nintendo_home' },
   { id: 'Wii', label: 'Nintendo Wii', badge: 'WII', family: 'nintendo_home' },
@@ -24,6 +26,7 @@ export const ALL_PLATFORMS = [
   { id: 'GBA', label: 'Game Boy Advance', badge: 'GBA', family: 'nintendo_handheld' },
   { id: 'GBC', label: 'Game Boy Color', badge: 'GBC', family: 'nintendo_handheld' },
   { id: 'GB', label: 'Game Boy', badge: 'GB', family: 'nintendo_handheld' },
+  { id: 'PS5', label: 'PlayStation 5', badge: 'PS5', family: 'playstation' },
   { id: 'PS4', label: 'PlayStation 4', badge: 'PS4', family: 'playstation' },
   { id: 'PS3', label: 'PlayStation 3', badge: 'PS3', family: 'playstation' },
   { id: 'PS2', label: 'PlayStation 2', badge: 'PS2', family: 'playstation' },
@@ -32,6 +35,8 @@ export const ALL_PLATFORMS = [
   { id: 'PSVita', label: 'PlayStation Vita', badge: 'PSV', family: 'playstation' },
   { id: 'Xbox360', label: 'Xbox 360', badge: 'X360', family: 'xbox' },
   { id: 'Xbox', label: 'Original Xbox', badge: 'XBOX', family: 'xbox' },
+  { id: 'Windows', label: 'Windows (PC)', badge: 'WIN', family: 'pc_desktop' },
+  { id: 'macOS', label: 'macOS', badge: 'MAC', family: 'pc_desktop' },
   { id: 'Dreamcast', label: 'Sega Dreamcast', badge: 'DC', family: 'sega' },
   { id: 'Saturn', label: 'Sega Saturn', badge: 'SAT', family: 'sega' },
   { id: 'SegaCD', label: 'Sega CD', badge: 'SCD', family: 'sega' },

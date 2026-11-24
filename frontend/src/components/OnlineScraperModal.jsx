@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Search, Compass, Plus, Loader2, Check, Sparkles, Database, Sliders, Magnet } from 'lucide-react';
+import { X, Search, Compass, Plus, Loader2, Check, Database, Sliders, Magnet, Download } from 'lucide-react';
 import { scrapeSearch, importScrapedGame } from '../services/api';
 
 const SCRAPER_PLATFORMS = [
@@ -14,6 +14,7 @@ const SCRAPER_PLATFORMS = [
   { id: 'GameCube', label: 'Nintendo GameCube' },
   { id: 'Wii', label: 'Nintendo Wii' },
   { id: 'Switch', label: 'Nintendo Switch' },
+  { id: 'Switch2', label: 'Nintendo Switch 2' },
   { id: 'Genesis', label: 'Sega Genesis / Mega Drive' },
   { id: 'SegaCD', label: 'Sega CD' },
   { id: 'Saturn', label: 'Sega Saturn' },
@@ -24,10 +25,13 @@ const SCRAPER_PLATFORMS = [
   { id: 'PS2', label: 'PlayStation 2 (PS2)' },
   { id: 'PS3', label: 'PlayStation 3 (PS3)' },
   { id: 'PS4', label: 'PlayStation 4 (PS4)' },
+  { id: 'PS5', label: 'PlayStation 5 (PS5)' },
   { id: 'PSP', label: 'PlayStation Portable (PSP)' },
   { id: 'PSVita', label: 'PlayStation Vita' },
   { id: 'Xbox', label: 'Original Xbox' },
   { id: 'Xbox360', label: 'Xbox 360' },
+  { id: 'Windows', label: 'Windows (PC)' },
+  { id: 'macOS', label: 'macOS' },
   { id: 'TG16', label: 'TurboGrafx-16 (TG16)' },
   { id: 'NeoGeo', label: 'Neo Geo AES/MVS' },
   { id: 'Atari2600', label: 'Atari 2600' },
@@ -35,12 +39,13 @@ const SCRAPER_PLATFORMS = [
   { id: 'Arcade', label: 'Arcade Classics (MAME)' },
 ];
 
-export default function OnlineScraperModal({ isOpen, onClose, onGameImported, onOpenSettings }) {
+export default function OnlineScraperModal({ isOpen, onClose, onGameImported, onStartDownload, onOpenSettings }) {
   const [query, setQuery] = useState('');
   const [platform, setPlatform] = useState('SNES');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState([]);
   const [importedIds, setImportedIds] = useState(new Set());
+  const [queuedIds, setQueuedIds] = useState(new Set());
   const [searched, setSearched] = useState(false);
 
   if (!isOpen) return null;
@@ -69,14 +74,29 @@ export default function OnlineScraperModal({ isOpen, onClose, onGameImported, on
       if (onGameImported) onGameImported(game);
     } catch (err) {
       console.error(err);
-      alert('Could not import game to store catalog.');
+      alert('Could not add game to catalog.');
+    }
+  };
+
+  const handleDownload = async (item) => {
+    const targetUrl = item.direct_download_url || item.magnet_uri;
+    if (!targetUrl) return;
+    if (onStartDownload) {
+      await onStartDownload(
+        item,
+        item.magnet_uri && !item.direct_download_url ? 'magnet' : 'direct',
+        targetUrl,
+        `${item.title}${item.rom_format || '.zip'}`,
+        item.source
+      );
+      setQueuedIds(prev => new Set([...prev, item.id]));
     }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-2xl bg-[#0c1220] border border-white/15 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
-        
+      <div className="relative w-full max-w-3xl bg-[#0c1220] border border-white/15 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+
         {/* Header */}
         <div className="p-5 border-b border-white/10 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -85,10 +105,10 @@ export default function OnlineScraperModal({ isOpen, onClose, onGameImported, on
             </div>
             <div>
               <h3 className="font-display font-bold text-white text-lg">
-                Scrape Online ROM Sources
+                Live ROM Source Search
               </h3>
               <p className="text-xs text-slate-400">
-                Live search verified ROM mirrors, P2P torrents & Torznab indexers
+                Search verified ROM mirrors, P2P torrents & Torznab indexers and queue downloads directly
               </p>
             </div>
           </div>
@@ -98,7 +118,7 @@ export default function OnlineScraperModal({ isOpen, onClose, onGameImported, on
               <button
                 type="button"
                 onClick={onOpenSettings}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 transition-colors cursor-pointer"
                 title="Configure Torznab Indexers & Custom Search Engines"
               >
                 <Sliders className="w-3.5 h-3.5 text-cyan-400" />
@@ -107,7 +127,7 @@ export default function OnlineScraperModal({ isOpen, onClose, onGameImported, on
             )}
             <button
               onClick={onClose}
-              className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -122,7 +142,7 @@ export default function OnlineScraperModal({ isOpen, onClose, onGameImported, on
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Enter game title (e.g. EarthBound, Banjo Tooie, Spyro)..."
+              placeholder="Enter game title (e.g. EarthBound, Chrono Trigger, Spyro)..."
               className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
             />
           </div>
@@ -141,12 +161,12 @@ export default function OnlineScraperModal({ isOpen, onClose, onGameImported, on
             <button
               type="submit"
               disabled={loading || !query.trim()}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-bold text-sm flex items-center gap-2 disabled:opacity-50 transition-all shadow-md whitespace-nowrap"
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-bold text-sm flex items-center gap-2 disabled:opacity-50 transition-all shadow-md whitespace-nowrap cursor-pointer"
             >
               {loading ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Scraping...</span>
+                  <span>Searching...</span>
                 </>
               ) : (
                 <>
@@ -177,11 +197,13 @@ export default function OnlineScraperModal({ isOpen, onClose, onGameImported, on
 
           {!loading && results.map((item) => {
             const isImported = importedIds.has(item.id);
+            const isQueued = queuedIds.has(item.id);
+            const hasDownload = Boolean(item.direct_download_url || item.magnet_uri);
 
             return (
               <div
                 key={item.id}
-                className="p-3.5 rounded-2xl bg-slate-900/80 border border-white/5 hover:border-violet-500/40 transition-all flex items-center justify-between gap-4"
+                className="p-3.5 rounded-2xl bg-slate-900/80 border border-white/5 hover:border-violet-500/40 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
               >
                 <div className="flex items-center gap-3.5 min-w-0">
                   <img
@@ -223,27 +245,44 @@ export default function OnlineScraperModal({ isOpen, onClose, onGameImported, on
                   </div>
                 </div>
 
-                <button
-                  onClick={() => handleImport(item)}
-                  disabled={isImported}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 transition-all ${
-                    isImported
-                      ? 'bg-emerald-900/40 text-emerald-300 border border-emerald-500/40 cursor-default'
-                      : 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md hover:scale-105 active:scale-95'
-                  }`}
-                >
-                  {isImported ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>In Vault Store</span>
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add to Store</span>
-                    </>
+                <div className="flex items-center gap-2 shrink-0">
+                  {hasDownload && (
+                    <button
+                      onClick={() => handleDownload(item)}
+                      disabled={isQueued}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        isQueued
+                          ? 'bg-cyan-950 text-cyan-300 border border-cyan-500/40'
+                          : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black shadow-glow-cyan hover:scale-105'
+                      }`}
+                    >
+                      {isQueued ? <Check className="w-3.5 h-3.5" /> : <Download className="w-3.5 h-3.5" />}
+                      <span>{isQueued ? 'Queued' : 'Download'}</span>
+                    </button>
                   )}
-                </button>
+
+                  <button
+                    onClick={() => handleImport(item)}
+                    disabled={isImported}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      isImported
+                        ? 'bg-emerald-900/40 text-emerald-300 border border-emerald-500/40 cursor-default'
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/10'
+                    }`}
+                  >
+                    {isImported ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>In Catalog</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add to Catalog</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             );
           })}

@@ -6,10 +6,17 @@ import urllib.parse
 import re
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Body, Query
-from fastapi.responses import FileResponse
 from typing import Dict, Any, List
 from ..database import get_db_connection, row_to_game_dict
-from ..services.downloader import queue_download, DOWNLOAD_STATES, ACTIVE_TASKS
+from ..services.downloader import (
+    cancel_or_remove_download,
+    clear_finished_downloads,
+    get_queue_status,
+    move_queued_download,
+    queue_download,
+    set_queue_paused,
+    DOWNLOAD_STATES,
+)
 from ..services.storage_service import get_roms_dir, get_storage_config
 from ..services.mirror_resolver import mirror_resolver
 
@@ -38,17 +45,17 @@ def list_downloads():
             downloads.insert(0, dict(state))
             seen_ids.add(d_id)
             
-    # Sort: active downloading/queued first, then by date
+    # Sort: active downloading first, then waiting queue by queue_position, then finished history
     def sort_key(item):
         status = item.get("status", "")
-        if status == "downloading":
-            return 0
-        if status in ("queued", "resolving_mirror"):
-            return 1
-        return 2
+        if status in ("downloading", "resolving_mirror"):
+            return (0, 0)
+        if status == "queued":
+            return (1, int(item.get("queue_position") or 9999))
+        return (2, 0)
 
     downloads.sort(key=sort_key)
-    return {"downloads": downloads}
+    return {"downloads": downloads, "queue": get_queue_status()}
 
 _INSTALLED_CACHE: Dict[str, Any] = {
     "timestamp": 0.0,
@@ -78,28 +85,41 @@ def list_installed_games():
     
     installed_map: Dict[str, Dict[str, Any]] = {}
     valid_exts = {
-        ".zip", ".7z", ".sfc", ".smc", ".nes", ".z64", ".n64", ".v64",
+        ".zip", ".7z", ".rar", ".sfc", ".smc", ".nes", ".z64", ".n64", ".v64",
         ".gba", ".gb", ".gbc", ".nds", ".dsi", ".iso", ".chd", ".rvz", ".cso", ".gcm",
         ".pce", ".sms", ".gg", ".a26", ".a78", ".md", ".gen", ".bin", ".cue", ".pbp",
-        ".3ds", ".cia", ".vpk", ".pkg", ".nsp", ".xci", ".wux", ".wud", ".rpx", ".xbe", ".xex"
+        ".3ds", ".cia", ".vpk", ".pkg", ".nsp", ".xci", ".wux", ".wud", ".rpx", ".xbe", ".xex",
+        ".dmg", ".exe", ".msi", ".toast", ".img",
     }
-    
+
     for r in download_rows:
         path = r["destination_path"]
         if path and os.path.exists(path):
+            dir_bundle_bytes = None
             if os.path.isdir(path):
-                # If directory, find largest ROM file inside it recursively
-                rom_files = [
-                    f for f in Path(path).rglob("*")
-                    if f.is_file() and f.suffix.lower() in valid_exts and not f.name.endswith(".part")
-                ]
-                if rom_files:
-                    rom_files.sort(key=lambda x: x.stat().st_size, reverse=True)
-                    path = str(rom_files[0])
+                dir_p = Path(path)
+                if path.lower().endswith(".app"):
+                    dir_bundle_bytes = sum(f.stat().st_size for f in dir_p.rglob("*") if f.is_file())
                 else:
-                    continue
-            stat = os.stat(path)
-            size_mb = round(stat.st_size / (1024 * 1024), 2)
+                    # Find largest ROM file inside directory, excluding macOS .app internals
+                    rom_files = [
+                        f for f in dir_p.rglob("*")
+                        if f.is_file()
+                        and f.suffix.lower() in valid_exts
+                        and not f.name.endswith(".part")
+                        and not any(parent.suffix.lower() == ".app" for parent in f.parents)
+                    ]
+                    if rom_files:
+                        rom_files.sort(key=lambda x: x.stat().st_size, reverse=True)
+                        path = str(rom_files[0])
+                    elif (r["platform"] or "").upper() in ("WINDOWS", "MACOS", "PS5"):
+                        dir_bundle_bytes = sum(f.stat().st_size for f in dir_p.rglob("*") if f.is_file())
+                        if dir_bundle_bytes <= 0:
+                            continue
+                    else:
+                        continue
+            total_bytes = dir_bundle_bytes if dir_bundle_bytes is not None else os.stat(path).st_size
+            size_mb = round(total_bytes / (1024 * 1024), 2)
             title = r["game_title"]
             box_art = r["box_art_2d"] or f"/api/covers/image?title={urllib.parse.quote(title)}&platform={urllib.parse.quote(r['platform'])}"
             real_filename = os.path.basename(path)
@@ -114,31 +134,50 @@ def list_installed_games():
                 "box_art_2d": box_art,
                 "genre": r["genre"] or "Action-Adventure",
                 "rating": r["rating"],
-                "description": r["description"] or "Officially preserved and ready to play in OmniVault.",
+                "description": r["description"] or "Saved on local ROM library.",
                 "downloaded_at": r["updated_at"] or r["created_at"]
             }
 
-    # 2. Also scan configured ROMs subdirectories directly for any present ROMs
+    # 2. Also scan configured ROMs subdirectories and writable cloud mount directories for present ROMs
     from ..services.storage_service import get_roms_dir
+    from ..services.cloud_storage_service import get_cloud_targets_status
+
     roms_dir = get_roms_dir()
     EXCLUDED_FOLDERS = {
         "BIOS", "EMULATORS", "CORES", "FIRMWARE", "KEYS",
         "PATCHES", "SAVESNAPSHOTS", "SAVES", "STATES",
         "SHADERS", "TEXTURES", "OMNIVAULT-DATA", "OMNIVAULT-SOURCE", "OMNIVAULT.APP"
     }
-    
-    if roms_dir.exists() and roms_dir.is_dir():
-        for plat_folder in roms_dir.iterdir():
-            if plat_folder.is_dir() and not plat_folder.name.startswith((".", "OmniVault")) and plat_folder.name.upper() not in EXCLUDED_FOLDERS:
-                platform_name = plat_folder.name
-                for rom_file in plat_folder.rglob("*"):
-                    if rom_file.is_file() and rom_file.suffix.lower() in valid_exts and not rom_file.name.endswith(".part"):
-                        if rom_file.suffix.lower() == ".bin" and rom_file.with_suffix(".cue").exists():
+
+    scan_roots = [("Local Drive", roms_dir)]
+    try:
+        cloud_info = get_cloud_targets_status()
+        for ct in cloud_info.get("targets") or []:
+            if ct.get("available") and ct.get("mode") == "mount" and ct.get("roms_path"):
+                cp = Path(ct["roms_path"])
+                if cp != roms_dir and cp.exists():
+                    scan_roots.append((ct.get("name") or ct["id"], cp))
+    except Exception:
+        pass
+
+    for storage_label, root_dir in scan_roots:
+        if root_dir.exists() and root_dir.is_dir():
+            for plat_folder in root_dir.iterdir():
+                if plat_folder.is_dir() and not plat_folder.name.startswith((".", "OmniVault")) and plat_folder.name.upper() not in EXCLUDED_FOLDERS:
+                    platform_name = plat_folder.name
+                    for rom_file in plat_folder.rglob("*"):
+                        if any(parent.suffix.lower() == ".app" for parent in rom_file.parents):
+                            continue
+                        is_app_bundle = rom_file.is_dir() and rom_file.suffix.lower() == ".app"
+                        is_valid_file = rom_file.is_file() and rom_file.suffix.lower() in valid_exts and not rom_file.name.endswith(".part")
+                        if not (is_app_bundle or is_valid_file):
+                            continue
+                        if is_valid_file and rom_file.suffix.lower() == ".bin" and rom_file.with_suffix(".cue").exists():
                             continue
                         fpath = str(rom_file)
                         if fpath in installed_map:
                             continue
-                            
+
                         clean_stem = rom_file.stem
                         if clean_stem.upper() in ("EBOOT", "DEFAULT", "GAME", "TRACK01", "TRACK 01") and rom_file.parent != plat_folder:
                             clean_stem = rom_file.parent.name
@@ -166,12 +205,16 @@ def list_installed_games():
                         # Deduplicate: If an entry already exists in installed_map for this exact game or title, don't show duplicate unmanaged card
                         if any(item.get("title", "").lower() == final_title.lower() for item in installed_map.values()):
                             continue
-                        if rom_file.suffix.lower() in (".zip", ".7z", ".rar") and any(item.get("title", "").lower().startswith(clean_title.lower()) for item in installed_map.values()):
+                        if is_valid_file and rom_file.suffix.lower() in (".zip", ".7z", ".rar") and any(item.get("title", "").lower().startswith(clean_title.lower()) for item in installed_map.values()):
                             continue
 
                         box_art = game_dict.get("box_art_2d") or f"/api/covers/image?title={urllib.parse.quote(final_title)}&platform={urllib.parse.quote(platform_name)}"
-                        stat = rom_file.stat()
-                        size_mb = round(stat.st_size / (1024 * 1024), 2)
+                        total_bytes = (
+                            sum(f.stat().st_size for f in rom_file.rglob("*") if f.is_file())
+                            if is_app_bundle
+                            else rom_file.stat().st_size
+                        )
+                        size_mb = round(total_bytes / (1024 * 1024), 2)
                         
                         installed_map[fpath] = {
                             "id": f"local-{clean_stem[:12]}",
@@ -184,8 +227,9 @@ def list_installed_games():
                             "box_art_2d": box_art,
                             "genre": game_dict.get("genre", "Classic"),
                             "rating": game_dict.get("rating"),
-                            "description": game_dict.get("description", "Locally stored classic ROM ready to play."),
-                            "downloaded_at": "Local Drive"
+                            "description": game_dict.get("description", "Saved on local ROM library."),
+                            "downloaded_at": storage_label,
+                            "storage_location": storage_label,
                         }
 
     conn.close()
@@ -198,6 +242,7 @@ def list_installed_games():
 async def start_download(payload: Dict[str, Any] = Body(...)):
     game_id = payload.get("game_id")
     download_type = payload.get("type", "direct")
+    destination_target = payload.get("destination_target")
     
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -213,14 +258,18 @@ async def start_download(payload: Dict[str, Any] = Body(...)):
         if magnet_or_torrent and (magnet_or_torrent.startswith("magnet:") or magnet_or_torrent.endswith(".torrent")):
             # Start native BitTorrent download via aria2c worker
             filename = payload.get("filename") or f"{game['title']}.zip"
-            item = queue_download(
-                game_id=game["id"],
-                game_title=game["title"],
-                platform=game["platform"],
-                url=magnet_or_torrent,
-                filename=filename,
-                download_type="torrent"
-            )
+            try:
+                item = queue_download(
+                    game_id=game["id"],
+                    game_title=game["title"],
+                    platform=game["platform"],
+                    url=magnet_or_torrent,
+                    filename=filename,
+                    download_type="torrent",
+                    destination_target=destination_target,
+                )
+            except ValueError as ve:
+                raise HTTPException(status_code=400, detail=str(ve))
             return {
                 "status": "queued",
                 "message": f"Queued BitTorrent download for {game['title']}",
@@ -231,21 +280,62 @@ async def start_download(payload: Dict[str, Any] = Body(...)):
 
     url = payload.get("direct_url") or game["direct_download_url"] or ""
 
-    # If the URL is empty, an invalid archive.org URL, or an expired/temporary token link, dynamically resolve live line-speed mirror or torrent
-    is_temp_or_dead = not url or "archive.org" in url or "blueroms.ws" in url or ("expires=" in url and "sig=" in url)
+    # If the URL is empty or an expired/temporary token link, resolve from configured BYOS sources
+    is_temp_or_dead = not url or "gAAAAAB" in url or ("expires=" in url and "sig=" in url)
     if is_temp_or_dead:
         mirrors = await mirror_resolver.get_rom_mirrors(game["title"], game["platform"])
         if mirrors:
-            # 1. Filter for true direct mirrors first
-            direct_mirrors = [
-                m for m in mirrors
-                if m.get("is_direct") and not any(h in (m.get("direct_url") or "").lower() for h in ("datanodes.to", "filecrypt.cc", "1fichier.com"))
-            ]
-            if direct_mirrors:
-                best_mirror = direct_mirrors[0]
-                url = best_mirror.get("direct_url") or ""
-                if not payload.get("filename") and best_mirror.get("filename"):
-                    payload["filename"] = best_mirror.get("filename")
+            # Mirrors arrive strictly ranked (Real-Debrid priority when active, else fastest direct CDN -> top-seeded torrent)
+            from ..services.realdebrid_service import is_realdebrid_active, is_hoster_url
+            rd_active = is_realdebrid_active()
+            selected = None
+            for m in mirrors:
+                cand_url = str(m.get("direct_url") or "").strip()
+                if not cand_url:
+                    continue
+                cand_low = cand_url.lower()
+                if "filecrypt.cc" in cand_low:
+                    continue
+                is_tor = cand_url.startswith("magnet:") or cand_low.endswith(".torrent")
+                if is_tor:
+                    selected = m
+                    break
+                if m.get("is_direct") and (rd_active or not is_hoster_url(cand_url)):
+                    selected = m
+                    break
+
+            if selected:
+                sel_url = str(selected["direct_url"]).strip()
+                if sel_url.startswith("magnet:") or sel_url.lower().endswith(".torrent"):
+                    t_filename = selected.get("filename") or f"{game['title']}.zip"
+                    t_size = float(selected.get("file_size_mb") or 0.0)
+                    if t_size > 0:
+                        conn = get_db_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE games SET file_size_mb = ? WHERE id = ?", (t_size, game["id"]))
+                        conn.commit()
+                        conn.close()
+                    try:
+                        item = queue_download(
+                            game_id=game["id"],
+                            game_title=game["title"],
+                            platform=game["platform"],
+                            url=sel_url,
+                            filename=t_filename,
+                            download_type="torrent",
+                            destination_target=destination_target,
+                        )
+                    except ValueError as ve:
+                        raise HTTPException(status_code=400, detail=str(ve))
+                    return {
+                        "status": "queued",
+                        "message": f"Queued top-ranked download ({selected.get('source_name', 'Torrent')})",
+                        "download": item,
+                    }
+
+                url = sel_url
+                if not payload.get("filename") and selected.get("filename"):
+                    payload["filename"] = selected.get("filename")
                 if url and "expires=" not in url and "sig=" not in url:
                     conn = get_db_connection()
                     cursor = conn.cursor()
@@ -253,52 +343,30 @@ async def start_download(payload: Dict[str, Any] = Body(...)):
                     conn.commit()
                     conn.close()
             else:
-                # 2. Check for active BitTorrent mirrors (The Pirate Bay, Nyaa)
-                torrent_mirrors = [m for m in mirrors if (m.get("direct_url") or "").startswith("magnet:") or (m.get("direct_url") or "").endswith(".torrent")]
-                if torrent_mirrors:
-                    best_torrent = torrent_mirrors[0]
-                    t_url = best_torrent["direct_url"]
-                    t_filename = best_torrent.get("filename") or f"{game['title']}.zip"
-                    t_size = float(best_torrent.get("file_size_mb") or 0.0)
-                    if t_size > 0:
-                        conn = get_db_connection()
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE games SET file_size_mb = ? WHERE id = ?", (t_size, game["id"]))
-                        conn.commit()
-                        conn.close()
-                    item = queue_download(
-                        game_id=game["id"],
-                        game_title=game["title"],
-                        platform=game["platform"],
-                        url=t_url,
-                        filename=t_filename,
-                        download_type="torrent"
-                    )
-                    return {
-                        "status": "queued",
-                        "message": f"Queued internal BitTorrent download ({best_torrent.get('source_name', 'Torrent')})",
-                        "download": item
-                    }
-                else:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="No direct ROM mirror or torrent available for automated internal download. Open the game details to choose from alternative verified mirrors."
-                    )
+                raise HTTPException(
+                    status_code=400,
+                    detail="No direct ROM mirror or torrent available for automated internal download. Open the game details to choose from alternative verified mirrors.",
+                )
 
-    if any(h in url.lower() for h in ("datanodes.to", "filecrypt.cc", "1fichier.com", "mega.nz", "ziperto.com")):
+    from ..services.realdebrid_service import is_realdebrid_active, is_hoster_url
+    if not is_realdebrid_active() and (is_hoster_url(url) or "filecrypt.cc" in url.lower()):
         # If the stored URL was a web hoster, try falling back to an internal torrent
         mirrors = await mirror_resolver.get_rom_mirrors(game["title"], game["platform"])
         torrent_mirrors = [m for m in mirrors if (m.get("direct_url") or "").startswith("magnet:") or (m.get("direct_url") or "").endswith(".torrent")]
         if torrent_mirrors:
             best_torrent = torrent_mirrors[0]
-            item = queue_download(
-                game_id=game["id"],
-                game_title=game["title"],
-                platform=game["platform"],
-                url=best_torrent["direct_url"],
-                filename=best_torrent.get("filename") or f"{game['title']}.zip",
-                download_type="torrent"
-            )
+            try:
+                item = queue_download(
+                    game_id=game["id"],
+                    game_title=game["title"],
+                    platform=game["platform"],
+                    url=best_torrent["direct_url"],
+                    filename=best_torrent.get("filename") or f"{game['title']}.zip",
+                    download_type="torrent",
+                    destination_target=destination_target,
+                )
+            except ValueError as ve:
+                raise HTTPException(status_code=400, detail=str(ve))
             return {
                 "status": "queued",
                 "message": f"Queued internal BitTorrent download ({best_torrent.get('source_name', 'Torrent')})",
@@ -335,48 +403,19 @@ async def start_download(payload: Dict[str, Any] = Body(...)):
     is_torrent_url = url.startswith("magnet:") or url.endswith(".torrent")
     effective_type = "torrent" if is_torrent_url else "direct"
             
-    item = queue_download(
-        game_id=game["id"],
-        game_title=game["title"],
-        platform=game["platform"],
-        url=url,
-        filename=filename,
-        download_type=effective_type
-    )
-    return item
-
-@router.get("/rom-file")
-def get_rom_file(path: str = Query(..., description="Absolute path to the ROM file on disk")):
-    if not path or not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="ROM file does not exist on disk")
-    from ..services.emulator_manager import emulator_manager
-    effective_path = emulator_manager._resolve_active_mod_rom(path)
-    real_path = os.path.realpath(effective_path)
-    allowed_roots = [str(get_roms_dir()), "/Volumes/ROMS", "OmniVault", "Downloads", "GAMES"]
-    if not any(root in real_path or real_path.startswith(root) for root in allowed_roots):
-        raise HTTPException(status_code=403, detail="Access denied to requested file path")
-    return FileResponse(
-        real_path,
-        filename=os.path.basename(real_path),
-        media_type="application/octet-stream"
-    )
-
-@router.post("/launch")
-def launch_game(payload: Dict[str, Any] = Body(...)):
-    path = payload.get("path")
-    platform = payload.get("platform")
-    if not path or not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="ROM file does not exist on disk")
-        
     try:
-        from ..services.emulator_manager import emulator_manager
-        if not platform:
-            parent_name = os.path.basename(os.path.dirname(path))
-            platform = parent_name
-        res = emulator_manager.launch_game(path, platform, force=True)
-        return res
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        item = queue_download(
+            game_id=game["id"],
+            game_title=game["title"],
+            platform=game["platform"],
+            url=url,
+            filename=filename,
+            download_type=effective_type,
+            destination_target=destination_target,
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    return item
 
 @router.post("/delete")
 def delete_installed_rom(payload: Dict[str, Any] = Body(...)):
@@ -444,21 +483,35 @@ def reveal_in_finder(download_id: str):
             return {"status": "success", "opened": parent}
         raise HTTPException(status_code=404, detail="File does not exist on disk")
 
+@router.post("/{download_id}/move")
+async def move_download_in_queue(download_id: str, payload: Dict[str, Any] = Body(...)):
+    direction = (payload.get("direction") or "up").strip().lower()
+    moved = move_queued_download(download_id, direction)
+    if not moved:
+        raise HTTPException(status_code=400, detail="Download is not waiting in the sequential queue")
+    return {"status": "moved", "id": download_id, "queue": get_queue_status()}
+
+
+@router.post("/queue/pause")
+async def pause_download_queue():
+    return {"status": "paused", "queue": set_queue_paused(True)}
+
+
+@router.post("/queue/resume")
+async def resume_download_queue():
+    return {"status": "resumed", "queue": set_queue_paused(False)}
+
+
+@router.post("/clear-completed")
+async def clear_completed_downloads_route():
+    removed = clear_finished_downloads()
+    return {"status": "cleared", "removed": removed, "queue": get_queue_status()}
+
+
 @router.delete("/{download_id}")
-def cancel_download(download_id: str):
-    if download_id in ACTIVE_TASKS:
-        ACTIVE_TASKS[download_id].cancel()
-        del ACTIVE_TASKS[download_id]
-        
-    if download_id in DOWNLOAD_STATES:
-        del DOWNLOAD_STATES[download_id]
-        
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM downloads WHERE id = ?", (download_id,))
-    conn.commit()
-    conn.close()
-    return {"status": "cancelled", "id": download_id}
+async def cancel_download(download_id: str):
+    cancel_or_remove_download(download_id)
+    return {"status": "cancelled", "id": download_id, "queue": get_queue_status()}
 
 @router.post("/verify-checksum")
 def verify_checksum(payload: Dict[str, Any] = Body(...)):

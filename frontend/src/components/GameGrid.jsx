@@ -1,7 +1,7 @@
 import React from 'react';
 import GameCard from './GameCard';
 import Pagination from './Pagination';
-import { Sparkles, SlidersHorizontal, Compass, X } from 'lucide-react';
+import { Sparkles, SlidersHorizontal, Compass, X, RefreshCw } from 'lucide-react';
 
 export default function GameGrid({ 
   games, 
@@ -16,6 +16,9 @@ export default function GameGrid({
   selectedPlatform,
   selectedGenre,
   onResetFilters,
+  onSyncPlatform,
+  syncingPlatform = null,
+  globalVaultTotal = 0,
   pagination
 }) {
   const hasActiveFilters = selectedFamily !== 'ALL' || selectedPlatform !== 'ALL' || selectedGenre !== 'ALL' || !!searchTerm;
@@ -25,6 +28,7 @@ export default function GameGrid({
     nintendo_home: 'Nintendo Home',
     nintendo_handheld: 'Nintendo Handheld',
     xbox: 'Xbox',
+    pc_desktop: 'PC & Mac',
     sega: 'Sega',
     arcade_retro: 'Arcade & Retro',
   };
@@ -35,12 +39,14 @@ export default function GameGrid({
       {/* Header with Results Count & Sort Dropdown */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
         <div>
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <h2 className="font-display font-bold text-xl text-white tracking-wide">
-              Storefront Catalog
+              ROM Catalog
             </h2>
-            <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-cyan-950/60 text-cyan-300 border border-cyan-800/40">
-              {pagination.total.toLocaleString()} total
+            <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-cyan-950/60 text-cyan-300 border border-cyan-800/40">
+              {hasActiveFilters && globalVaultTotal > 0
+                ? `${pagination.total.toLocaleString()} of ${globalVaultTotal.toLocaleString()} titles`
+                : `${pagination.total.toLocaleString()} total titles`}
             </span>
           </div>
 
@@ -108,7 +114,21 @@ export default function GameGrid({
           <p className="text-slate-400 text-sm max-w-md mx-auto mb-5">
             Try choosing a different genre or console, or clear your search query to see the verified library.
           </p>
-          <div className="flex items-center justify-center gap-3">
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            {selectedPlatform && selectedPlatform !== 'ALL' && !searchTerm && selectedGenre === 'ALL' && onSyncPlatform && (
+              <button
+                onClick={() => onSyncPlatform(selectedPlatform)}
+                disabled={syncingPlatform === selectedPlatform}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-400 hover:to-cyan-400 text-black font-bold text-xs shadow-glow-cyan transition-all hover:scale-105 cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${syncingPlatform === selectedPlatform ? 'animate-spin' : ''}`} />
+                <span>
+                  {syncingPlatform === selectedPlatform
+                    ? `Syncing ${selectedPlatform}...`
+                    : `Sync ${selectedPlatform} Titles (TheGamesDB)`}
+                </span>
+              </button>
+            )}
             <button
               onClick={onResetFilters}
               className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-xs shadow-glow-cyan transition-all hover:scale-105 cursor-pointer"

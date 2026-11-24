@@ -157,11 +157,37 @@ async def scrape_game_metadata(title: str, platform: str, fetch_remote_synopsis:
     clean_title = re.sub(r"\[.*?\]", "", re.split(r"\(", title)[0]).strip() or title
     genre = classify_genre(clean_title)
 
-    wiki = fetch_wikipedia_game_synopsis_sync(clean_title, platform) if fetch_remote_synopsis else None
+    tgdb = None
+    if fetch_remote_synopsis:
+        try:
+            from ..services.thegamesdb_service import (
+                is_thegamesdb_active,
+                lookup_game_thegamesdb,
+                MODERN_TGDB_FIRST_PLATFORMS,
+            )
+            if is_thegamesdb_active() and platform in MODERN_TGDB_FIRST_PLATFORMS:
+                tgdb = await lookup_game_thegamesdb(clean_title, platform)
+        except Exception:
+            tgdb = None
+
+    if tgdb and tgdb.get("box_art_2d"):
+        box_2d = tgdb["box_art_2d"]
+        snap = tgdb["box_art_2d"]
+    if tgdb and tgdb.get("genre"):
+        genre = tgdb["genre"]
+
+    wiki = None
+    if fetch_remote_synopsis and not (tgdb and tgdb.get("description")):
+        wiki = fetch_wikipedia_game_synopsis_sync(clean_title, platform)
+
     description = (
-        wiki["description"]
-        if wiki and wiki.get("description")
-        else f"{clean_title} ({platform}) — preserved release with verified checksums, box art, and full emulator compatibility in OmniVault."
+        (tgdb.get("description") if tgdb and tgdb.get("description") else None)
+        or (wiki["description"] if wiki and wiki.get("description") else None)
+        or f"{clean_title} ({platform}) — cataloged release in OmniVault."
+    )
+    release_year = (
+        (tgdb.get("release_year") if tgdb else None)
+        or (wiki.get("release_year") if wiki else None)
     )
 
     return {
@@ -174,7 +200,7 @@ async def scrape_game_metadata(title: str, platform: str, fetch_remote_synopsis:
         "screenshots": [snap, box_2d],
         "rating": None,
         "rating_count": 0,
-        "release_year": wiki.get("release_year") if wiki else None,
+        "release_year": release_year,
         "developer": wiki.get("developer") if wiki else None,
         "publisher": wiki.get("publisher") if wiki else None,
         "genre": genre,

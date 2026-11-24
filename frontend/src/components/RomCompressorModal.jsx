@@ -48,6 +48,7 @@ export default function RomCompressorModal({ isOpen, onClose }) {
     try {
       const res = await convertRomFormat({
         game_id: item.game_id,
+        file_path: item.file_path,
         target_format: item.target_format
       });
       playVictorySound();
@@ -245,8 +246,7 @@ export default function RomCompressorModal({ isOpen, onClose }) {
                   <span>Automatic Multi-Disc Consolidation</span>
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  Consolidates multi-disc games (like Metal Gear Solid or Final Fantasy) into a single master playlist (.m3u). 
-                  This removes duplicate entries in your vault and enables seamless disc swapping in the Quick Menu.
+                  Organizes multi-disc games (like Metal Gear Solid or Final Fantasy) into a single master playlist (.m3u) in your ROM folder.
                 </p>
 
                 <div className="space-y-2 pt-2">

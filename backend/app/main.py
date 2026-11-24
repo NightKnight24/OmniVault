@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from .database import init_db, get_db_connection, DB_PATH
 from .scrapers.catalog_builder import populate_master_catalog
-from .routers import games, scrape, downloads, ai, providers, cheats_engine, translation, mirrors, emulators, themes, achievements, saves, compressor, netplay, mods, storage, covers
+from .routers import games, scrape, downloads, providers, mirrors, compressor, storage, covers
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
@@ -21,8 +21,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="OmniVault API",
-    description="Classic ROM Storefront & Scraper Backend",
-    version="1.0.0",
+    description="ROM Finder, Metadata Catalog & Download Manager",
+    version="2.0.0",
     lifespan=lifespan
 )
 
@@ -37,18 +37,9 @@ app.add_middleware(
 app.include_router(games.router)
 app.include_router(scrape.router)
 app.include_router(downloads.router)
-app.include_router(ai.router)
 app.include_router(providers.router)
-app.include_router(cheats_engine.router)
-app.include_router(translation.router)
 app.include_router(mirrors.router)
-app.include_router(emulators.router)
-app.include_router(themes.router)
-app.include_router(achievements.router)
-app.include_router(saves.router)
 app.include_router(compressor.router)
-app.include_router(netplay.router)
-app.include_router(mods.router)
 app.include_router(storage.router)
 app.include_router(covers.router)
 

@@ -8,28 +8,18 @@ import GameDetailModal from './components/GameDetailModal';
 import DownloadDrawer from './components/DownloadDrawer';
 import OnlineScraperModal from './components/OnlineScraperModal';
 import DownloadedGamesTab from './components/DownloadedGamesTab';
-import AIAssistantDrawer from './components/AIAssistantDrawer';
 import ProvidersSettingsModal from './components/ProvidersSettingsModal';
-import CheatLabModal from './components/CheatLabModal';
 import MirrorsHubModal from './components/MirrorsHubModal';
-import KodiBigPictureView from './components/KodiBigPictureView';
-import QuickMenuOverlay from './components/QuickMenuOverlay';
 import InitialSetupWizardModal from './components/InitialSetupWizardModal';
-import AchievementToast from './components/AchievementToast';
 import RomCompressorModal from './components/RomCompressorModal';
-import NetplayLobbyModal from './components/NetplayLobbyModal';
-import ThemeStudioModal from './components/ThemeStudioModal';
-import SaveTimeMachineModal from './components/SaveTimeMachineModal';
-import ModStoreModal from './components/ModStoreModal';
-import { useTheme } from './context/ThemeContext';
-import { gamepadService } from './services/gamepadService';
-import { 
-  fetchGames, fetchPlatforms, fetchGenres, fetchDownloads, 
+import {
+  fetchGames, fetchPlatforms, fetchGenres, fetchDownloads,
   fetchInstalledGames, startDownload, toggleFavorite, fetchFavoritesCount,
-  fetchSetupStatus, importAndDownloadMirror
+  fetchSetupStatus, importAndDownloadMirror, fetchMirrorSources, fetchProviders,
+  syncTheGamesDbPlatform
 } from './services/api';
 import { isSoundEnabled, setSoundEnabled } from './utils/soundEffects';
-import { Radio, Download, Sparkles, AlertCircle, Bot, Heart } from 'lucide-react';
+import { Radio, Download, Heart } from 'lucide-react';
 
 export default function App() {
   const [currentView, setCurrentView] = useState('store'); // 'store', 'downloaded', 'favorites'
@@ -39,7 +29,7 @@ export default function App() {
   const [installedCount, setInstalledCount] = useState(0);
   const [favoritesCount, setFavoritesCount] = useState(0);
   const [soundEnabled, setSoundEnabledState] = useState(isSoundEnabled());
-  
+
   // Filtering & Pagination State
   const [selectedFamily, setSelectedFamily] = useState('ALL');
   const [selectedPlatform, setSelectedPlatform] = useState('ALL');
@@ -50,65 +40,31 @@ export default function App() {
   const [pageSize, setPageSize] = useState(24);
   const [totalPages, setTotalPages] = useState(1);
   const [totalGamesCount, setTotalGamesCount] = useState(0);
-  const [globalVaultTotal, setGlobalVaultTotal] = useState(67594);
-  
+  const [globalVaultTotal, setGlobalVaultTotal] = useState(0);
+  const [activeSourcesCount, setActiveSourcesCount] = useState(0);
+  const [sourcesVersion, setSourcesVersion] = useState(0);
+  const [syncingPlatform, setSyncingPlatform] = useState(null);
+
   // Modals & Drawers
   const [selectedGame, setSelectedGame] = useState(null);
   const [isDownloadsOpen, setIsDownloadsOpen] = useState(false);
   const [isScraperOpen, setIsScraperOpen] = useState(false);
-  const [isAIOpen, setIsAIOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isCheatLabOpen, setIsCheatLabOpen] = useState(false);
   const [isMirrorsOpen, setIsMirrorsOpen] = useState(false);
-  const [isQuickMenuOpen, setIsQuickMenuOpen] = useState(false);
   const [isSetupWizardOpen, setIsSetupWizardOpen] = useState(false);
-  const [setupWizardStep, setSetupWizardStep] = useState(1);
-  const [isThemeStudioOpen, setIsThemeStudioOpen] = useState(false);
   const [isCompressorOpen, setIsCompressorOpen] = useState(false);
-  const [isNetplayOpen, setIsNetplayOpen] = useState(false);
-  const [isSaveTimeMachineOpen, setIsSaveTimeMachineOpen] = useState(false);
-  const [isModStoreOpen, setIsModStoreOpen] = useState(false);
-  const [unlockedAchievementToast, setUnlockedAchievementToast] = useState(null);
-  
-  // 10-Foot Living Room / Kodi Mode from ThemeContext
-  const { isKodiMode, toggleKodiMode } = useTheme();
 
   // Downloads State
   const [downloads, setDownloads] = useState([]);
+  const [queueStatus, setQueueStatus] = useState(null);
   const [notification, setNotification] = useState(null);
 
-  // Global Gamepad Action Listener & Keyboard Shortcuts (PS Button, Xbox Guide, F1, Esc)
   useEffect(() => {
-    const unsub = gamepadService.subscribeActions((action) => {
-      if (action === 'TOGGLE_QUICK_MENU') {
-        setIsQuickMenuOpen(prev => !prev);
-      } else if (action === 'TOGGLE_MODE') {
-        toggleKodiMode();
-      }
-    });
-    return unsub;
-  }, [toggleKodiMode]);
-
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'F1') {
-        e.preventDefault();
-        setIsQuickMenuOpen(prev => !prev);
-      }
-    };
-    const handleCustomToggle = () => {
-      setIsQuickMenuOpen(prev => !prev);
-    };
-    const handleOpenSetupWizard = (e) => {
-      setSetupWizardStep(e?.detail?.step || 1);
+    const handleOpenSetupWizard = () => {
       setIsSetupWizardOpen(true);
     };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('omnivault-toggle-quickmenu', handleCustomToggle);
     window.addEventListener('omnivault-open-setup-wizard', handleOpenSetupWizard);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('omnivault-toggle-quickmenu', handleCustomToggle);
       window.removeEventListener('omnivault-open-setup-wizard', handleOpenSetupWizard);
     };
   }, []);
@@ -137,7 +93,6 @@ export default function App() {
         setSelectedGame(prev => ({ ...prev, is_favorite: res.is_favorite ? 1 : 0 }));
       }
       if (currentView === 'favorites' && !res.is_favorite) {
-        // If un-favoriting while viewing favorites tab, reload list
         loadGames();
       }
     } catch (err) {
@@ -178,6 +133,20 @@ export default function App() {
     }
   };
 
+  const loadActiveSourcesCount = useCallback(async () => {
+    try {
+      const [mirRes, provRes] = await Promise.all([
+        fetchMirrorSources(false).catch(() => ({ sources: [] })),
+        fetchProviders().catch(() => ({ providers: [] })),
+      ]);
+      const enabledMirrors = (mirRes.sources || []).filter(s => s.is_enabled).length;
+      const enabledProviders = (provRes.providers || []).filter(p => p.is_enabled).length;
+      setActiveSourcesCount(enabledMirrors + enabledProviders);
+    } catch (err) {
+      // ignore
+    }
+  }, []);
+
   const loadGenres = useCallback(async () => {
     try {
       const data = await fetchGenres(selectedPlatform, selectedFamily);
@@ -187,14 +156,15 @@ export default function App() {
     }
   }, [selectedPlatform, selectedFamily]);
 
-  const loadDownloads = async () => {
+  const loadDownloads = useCallback(async () => {
     try {
       const data = await fetchDownloads();
       setDownloads(data.downloads || []);
+      if (data.queue) setQueueStatus(data.queue);
     } catch (err) {
       console.error('Failed to load downloads:', err);
     }
-  };
+  }, []);
 
   const loadInstalledCount = async () => {
     try {
@@ -205,7 +175,6 @@ export default function App() {
     }
   };
 
-  // Family and Platform selections
   const handleFamilySelect = (fam) => {
     setSelectedFamily(fam);
     setSelectedPlatform('ALL');
@@ -248,6 +217,7 @@ export default function App() {
 
   useEffect(() => {
     loadPlatforms();
+    loadActiveSourcesCount();
     loadDownloads();
     loadInstalledCount();
     loadFavorites();
@@ -266,24 +236,24 @@ export default function App() {
       }
     };
     checkInitialSetup();
-  }, []);
+  }, [loadDownloads]);
 
   useEffect(() => {
     loadGenres();
   }, [loadGenres]);
 
-  const activeDownloads = downloads.filter(d => d.status === 'downloading' || d.status === 'queued' || d.status === 'resolving_mirror');
+  const activeDownloads = downloads.filter(
+    d => d.status === 'downloading' || d.status === 'queued' || d.status === 'resolving_mirror'
+  );
 
-  // Polling for live download progress: fast (1.2s) when downloads are active or drawer is open
   useEffect(() => {
     const pollInterval = (activeDownloads.length > 0 || isDownloadsOpen) ? 1200 : 3000;
     const interval = setInterval(() => {
       loadDownloads();
     }, pollInterval);
     return () => clearInterval(interval);
-  }, [activeDownloads.length, isDownloadsOpen]);
+  }, [activeDownloads.length, isDownloadsOpen, loadDownloads]);
 
-  // Installed count polling (low-frequency 15s to guarantee zero WKWebView freezing)
   useEffect(() => {
     const interval = setInterval(() => {
       loadInstalledCount();
@@ -291,27 +261,49 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleStartDownload = async (game, type = 'direct', directUrl = null, filename = null, sourceName = null) => {
+  const showNotification = (msg, isError = false) => {
+    setNotification({ msg, isError });
+    setTimeout(() => setNotification(null), 4000);
+  };
+
+  const handleStartDownload = async (
+    game,
+    type = 'direct',
+    directUrl = null,
+    filename = null,
+    sourceName = null,
+    destinationTarget = null
+  ) => {
     try {
       let res;
       if (directUrl) {
         res = await importAndDownloadMirror({
+          game_id: game.id,
           title: game.title,
           platform: game.platform,
           direct_url: directUrl,
           filename: filename || `${game.title}.zip`,
-          source_name: sourceName || 'Direct Mirror'
+          source_name: sourceName || 'Direct Mirror',
+          destination_target: destinationTarget,
         });
+        loadPlatforms();
       } else {
-        res = await startDownload(game.id, type, directUrl, filename);
+        res = await startDownload(game.id, type, directUrl, filename, destinationTarget);
       }
-      
+
       if (res.status === 'magnet_dispatched') {
         showNotification(`Magnet link launched for ${game.title}`);
       } else if (res.status === 'browser_dispatched') {
-        showNotification(`🌐 Opened browser download mirror for ${game.title}`);
+        showNotification(`Opened browser download mirror for ${game.title}`);
       } else {
-        showNotification(`⚡ Download queued: ${game.title} (${(sourceName || type).toUpperCase()})`);
+        const qPos = res?.queue_position || res?.download?.queue_position;
+        const destLabel = res?.destination_label || res?.download?.destination_label;
+        const destSuffix = destLabel && destLabel !== 'Local Drive' ? ` → ${destLabel}` : '';
+        showNotification(
+          qPos && qPos > 1
+            ? `Added to sequential queue (#${qPos}): ${game.title}${destSuffix}`
+            : `Download started: ${game.title} (${(sourceName || type).toUpperCase()})${destSuffix}`
+        );
         setIsDownloadsOpen(true);
       }
       await loadDownloads();
@@ -321,34 +313,42 @@ export default function App() {
     }
   };
 
-  const showNotification = (msg, isError = false) => {
-    setNotification({ msg, isError });
-    setTimeout(() => setNotification(null), 4000);
-  };
-
   const handleGameImported = (importedGame) => {
     loadGames();
     loadPlatforms();
     loadGenres();
     setSelectedGame(importedGame);
-    showNotification(`Added ${importedGame.title} to storefront!`);
+    showNotification(`Added ${importedGame.title} to catalog!`);
   };
 
-  // Featured classic game for Hero Banner
-  const featuredGame = games.find(g => g.is_featured === 1) || games[0];
+  const handleQuickSyncPlatform = async (platform) => {
+    if (!platform || platform === 'ALL' || syncingPlatform) return;
+    setSyncingPlatform(platform);
+    try {
+      const res = await syncTheGamesDbPlatform(platform, 3, 1);
+      await Promise.all([loadPlatforms(), loadGenres(), loadGames()]);
+      const count = (res?.imported || 0) + (res?.updated || 0);
+      showNotification(`Synced ${count} ${platform} titles from TheGamesDB`);
+    } catch (err) {
+      console.error('Quick platform sync error:', err);
+      showNotification(`Failed to sync ${platform}: ${err.message}`, true);
+    } finally {
+      setSyncingPlatform(null);
+    }
+  };
 
-  // Get current download state for modal
-  const currentModalDownload = selectedGame 
-    ? downloads.find(d => d.game_id === selectedGame.id) 
+  const featuredGame = games.find(g => g.is_featured === 1) || games[0];
+  const currentModalDownload = selectedGame
+    ? downloads.find(d => d.game_id === selectedGame.id)
     : null;
 
   return (
     <div className="min-h-dvh w-full bg-[#080c14] text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-black overflow-x-clip">
-      
+
       {/* Toast Notification */}
       {notification && (
         <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-2xl shadow-2xl border flex items-center gap-3 animate-in fade-in slide-in-from-bottom duration-200 ${
-          notification.isError 
+          notification.isError
             ? 'bg-rose-950/90 border-rose-500/50 text-rose-200'
             : 'bg-cyan-950/90 border-cyan-500/50 text-cyan-200 shadow-glow-cyan'
         }`}>
@@ -371,54 +371,21 @@ export default function App() {
         activeDownloadsCount={activeDownloads.length}
         onOpenDownloads={() => setIsDownloadsOpen(true)}
         onOpenScraper={() => setIsScraperOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        onOpenCheatLab={() => setIsCheatLabOpen(true)}
         onOpenMirrors={() => setIsMirrorsOpen(true)}
-        onOpenAI={() => setIsAIOpen(true)}
+        onOpenCompressor={() => setIsCompressorOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
         totalGames={globalVaultTotal}
+        activeSourcesCount={activeSourcesCount}
         soundEnabled={soundEnabled}
         onToggleSound={handleToggleSound}
-        isKodiMode={isKodiMode}
-        onToggleKodiMode={toggleKodiMode}
-        onOpenSetupWizard={() => setIsSetupWizardOpen(true)}
-        onOpenThemeStudio={() => setIsThemeStudioOpen(true)}
-        onOpenCompressor={() => setIsCompressorOpen(true)}
-        onOpenNetplay={() => setIsNetplayOpen(true)}
-        onOpenModStore={() => setIsModStoreOpen(true)}
       />
 
-      {/* 10-Foot Kodi Living Room Cinema View OR Classic Storefront */}
-      {isKodiMode ? (
-        <KodiBigPictureView
-          games={games}
-          platforms={platforms}
-          installedCount={installedCount}
-          favoritesCount={favoritesCount}
-          totalGames={globalVaultTotal}
-          onSelectGame={(g) => setSelectedGame(g)}
-          onStartDownload={handleStartDownload}
-          onToggleFavorite={handleToggleFavorite}
-          onOpenSettings={() => setIsSettingsOpen(true)}
-          onOpenCheatLab={() => setIsCheatLabOpen(true)}
-          onOpenMirrors={() => setIsMirrorsOpen(true)}
-          onToggleKodiMode={toggleKodiMode}
-          onOpenQuickMenu={() => setIsQuickMenuOpen(true)}
-          onOpenSetupWizard={() => setIsSetupWizardOpen(true)}
-          onOpenThemeStudio={() => setIsThemeStudioOpen(true)}
-          onOpenCompressor={() => setIsCompressorOpen(true)}
-          onOpenNetplay={() => setIsNetplayOpen(true)}
-          onOpenModStore={() => setIsModStoreOpen(true)}
-          onOpenScraper={() => setIsScraperOpen(true)}
-        />
-      ) : (
-        <>
-          {/* Main Container */}
-          <main className="flex-1 max-w-[1600px] w-full mx-auto px-3 sm:px-5 lg:px-8 py-4 sm:py-6 lg:py-8 min-w-0">
-        
-        {/* VIEW 1: STOREFRONT */}
+      {/* Main Container */}
+      <main className="flex-1 max-w-[1600px] w-full mx-auto px-3 sm:px-5 lg:px-8 py-4 sm:py-6 lg:py-8 min-w-0">
+
+        {/* VIEW 1: CATALOG FINDER */}
         {currentView === 'store' && (
           <div>
-            {/* Featured Hero Banner */}
             {!searchTerm && selectedPlatform === 'ALL' && selectedGenre === 'ALL' && page === 1 && featuredGame && (
               <HeroBanner
                 game={featuredGame}
@@ -427,7 +394,6 @@ export default function App() {
               />
             )}
 
-            {/* 1. CONSOLE FILTER TABS & HARDWARE FAMILIES */}
             <PlatformFilter
               selectedFamily={selectedFamily}
               onSelectFamily={handleFamilySelect}
@@ -436,14 +402,12 @@ export default function App() {
               platformsData={platforms}
             />
 
-            {/* 2. GENRE FILTER PILLS */}
             <GenreFilter
               selectedGenre={selectedGenre}
               onSelectGenre={handleGenreSelect}
               genresData={genres}
             />
 
-            {/* 3. STOREFRONT GAME GRID WITH PAGINATION */}
             <GameGrid
               games={games}
               onSelectGame={(g) => setSelectedGame(g)}
@@ -457,6 +421,9 @@ export default function App() {
               selectedPlatform={selectedPlatform}
               selectedGenre={selectedGenre}
               onResetFilters={handleResetFilters}
+              onSyncPlatform={handleQuickSyncPlatform}
+              syncingPlatform={syncingPlatform}
+              globalVaultTotal={globalVaultTotal}
               pagination={{
                 page: page,
                 totalPages: totalPages,
@@ -475,17 +442,14 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 2: DOWNLOADED GAMES TAB */}
+        {/* VIEW 2: DOWNLOADED FILES TAB */}
         {currentView === 'downloaded' && (
           <DownloadedGamesTab
             onSelectGame={(g) => setSelectedGame(g)}
             onNavigateStore={() => setCurrentView('store')}
-            onOpenSettings={() => setIsSettingsOpen(true)}
-            onOpenCheatLab={() => setIsCheatLabOpen(true)}
-            onOpenModStore={() => setIsModStoreOpen(true)}
+            onOpenCompressor={() => setIsCompressorOpen(true)}
           />
         )}
-
 
         {/* VIEW 3: FAVORITES TAB */}
         {currentView === 'favorites' && (
@@ -496,8 +460,8 @@ export default function App() {
                   <Heart className="w-5 h-5 fill-white" />
                 </div>
                 <div>
-                  <h2 className="font-display font-bold text-xl text-white">Your Saved Favorites</h2>
-                  <p className="text-xs text-slate-400">Personal backlog and must-play titles bookmarked from the catalog.</p>
+                  <h2 className="font-display font-bold text-xl text-white">Saved Favorites</h2>
+                  <p className="text-xs text-slate-400">Personal download wishlist and bookmarked titles from the catalog.</p>
                 </div>
               </div>
               <span className="text-xs font-mono font-bold px-3 py-1 rounded-full bg-rose-950/80 text-rose-300 border border-rose-800/40">
@@ -534,53 +498,31 @@ export default function App() {
             />
           </div>
         )}
-
       </main>
 
-          {/* FLOATING OMNIAI TRIGGER ORB (Bottom Right) */}
-          <button
-            onClick={() => setIsAIOpen(true)}
-            className="fixed bottom-6 right-6 z-40 flex items-center gap-2.5 px-4 py-3 rounded-full bg-gradient-to-r from-cyan-500 via-sky-400 to-blue-600 text-black font-extrabold text-xs shadow-glow-cyan hover:scale-105 active:scale-95 transition-all cursor-pointer group"
-            title="Open OmniAI Copilot"
-          >
-            <div className="relative">
-              <Bot className="w-5 h-5 text-black group-hover:rotate-12 transition-transform" />
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-black flex items-center justify-center">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-300 animate-ping" />
-              </span>
-            </div>
-            <span className="tracking-wider uppercase text-[11px]">Ask OmniAI</span>
-          </button>
+      {/* Footer */}
+      <footer className="border-t border-white/5 py-8 text-center text-xs text-slate-500">
+        <p className="flex items-center justify-center gap-1.5 mb-1 text-slate-400">
+          <Radio className="w-3.5 h-3.5 text-cyan-400" />
+          <span className="font-display font-semibold text-slate-300">OmniVault • ROM Finder &amp; Download Manager</span>
+          <span>• {(globalVaultTotal || totalGamesCount) > 0 ? `${(globalVaultTotal || totalGamesCount).toLocaleString()} Catalog Titles` : 'Multi-Source ROM Finder'}</span>
+        </p>
+        <p>Catalog search, inline trailers &amp; gameplay, Real-Debrid unlock, sequential 1-at-a-time queue &amp; CHD/RVZ compression.</p>
+      </footer>
 
-          {/* Footer */}
-          <footer className="border-t border-white/5 py-8 text-center text-xs text-slate-500">
-            <p className="flex items-center justify-center gap-1.5 mb-1 text-slate-400">
-              <Radio className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="font-display font-semibold text-slate-300">OmniVault Classic Storefront</span>
-              <span>• {totalGamesCount > 0 ? `${totalGamesCount.toLocaleString()} Preserved Titles` : 'Preserved Classic Game Vault'}</span>
-            </p>
-            <p>Offline ROM vault, OmniAI Copilot, cheats engine, translation patches, and ROM hacks.</p>
-          </footer>
-        </>
-      )}
-
-      {/* GAME DETAIL POPUP MODAL */}
+      {/* GAME DETAIL & DOWNLOAD SOURCES MODAL */}
       <GameDetailModal
         game={selectedGame}
         onClose={() => setSelectedGame(null)}
         onStartDownload={handleStartDownload}
         onToggleFavorite={handleToggleFavorite}
+        onGameUpdated={(updated) => {
+          setSelectedGame(updated);
+          loadGames();
+        }}
         downloadState={currentModalDownload}
         onOpenSettings={() => setIsSettingsOpen(true)}
-        onOpenCheatLab={() => setIsCheatLabOpen(true)}
-        onOpenModStore={() => setIsModStoreOpen(true)}
-      />
-
-      {/* ADVANCED CHEAT ENGINEERING LAB MODAL */}
-      <CheatLabModal
-        isOpen={isCheatLabOpen}
-        onClose={() => setIsCheatLabOpen(false)}
-        selectedGame={selectedGame}
+        sourcesVersion={sourcesVersion}
       />
 
       {/* ROM SCRAPER & MIRRORS NETWORK MODAL */}
@@ -588,6 +530,10 @@ export default function App() {
         isOpen={isMirrorsOpen}
         onClose={() => setIsMirrorsOpen(false)}
         onDownloadQueued={loadDownloads}
+        onOpenSettings={() => {
+          setIsMirrorsOpen(false);
+          setIsSettingsOpen(true);
+        }}
       />
 
       {/* DOWNLOADS ACTIVITY DRAWER */}
@@ -595,126 +541,55 @@ export default function App() {
         isOpen={isDownloadsOpen}
         onClose={() => setIsDownloadsOpen(false)}
         downloads={downloads}
+        queueStatus={queueStatus}
         onRefresh={loadDownloads}
       />
 
-      {/* ONLINE SCRAPER MODAL */}
+      {/* LIVE ONLINE FINDER / SCRAPER MODAL */}
       <OnlineScraperModal
         isOpen={isScraperOpen}
         onClose={() => setIsScraperOpen(false)}
         onGameImported={handleGameImported}
+        onStartDownload={handleStartDownload}
         onOpenSettings={() => {
           setIsScraperOpen(false);
           setIsSettingsOpen(true);
         }}
       />
 
-      {/* SEARCH PROVIDERS & INDEXERS SETTINGS MODAL */}
+      {/* STORAGE, PROVIDERS & SEARCH TEMPLATES SETTINGS MODAL */}
       <ProvidersSettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onOpenSetupWizard={() => setIsSetupWizardOpen(true)}
         totalGames={globalVaultTotal || totalGamesCount}
-      />
-
-      {/* OMNIAI COPILOT ASSISTANT DRAWER */}
-      <AIAssistantDrawer
-        isOpen={isAIOpen}
-        onClose={() => setIsAIOpen(false)}
-        totalGames={globalVaultTotal || totalGamesCount}
-        onSelectGame={(g) => {
-          setSelectedGame(g);
-          setIsAIOpen(false);
+        onSourcesChanged={() => {
+          loadActiveSourcesCount();
+          setSourcesVersion(v => v + 1);
         }}
-        onQuickDownload={(g) => handleStartDownload(g, 'direct')}
-      />
-
-      {/* UNIVERSAL IN-GAME & IN-APP QUICK MENU OVERLAY */}
-      <QuickMenuOverlay
-        isOpen={isQuickMenuOpen}
-        onClose={() => setIsQuickMenuOpen(false)}
-        activeGame={selectedGame}
-        onExitGame={() => {
-          setIsQuickMenuOpen(false);
-          setSelectedGame(null);
-        }}
-        onUnlockAchievement={(ach) => setUnlockedAchievementToast(ach)}
-        onOpenCompressor={() => {
-          setIsQuickMenuOpen(false);
-          setIsCompressorOpen(true);
-        }}
-        onOpenNetplay={() => {
-          setIsQuickMenuOpen(false);
-          setIsNetplayOpen(true);
-        }}
-        onOpenCheatLab={() => {
-          setIsQuickMenuOpen(false);
-          setIsCheatLabOpen(true);
-        }}
-        onOpenSettings={() => {
-          setIsQuickMenuOpen(false);
-          setIsSettingsOpen(true);
-        }}
-        onOpenSetupWizard={() => {
-          setIsQuickMenuOpen(false);
-          setSetupWizardStep(1);
-          setIsSetupWizardOpen(true);
-        }}
-        onOpenModStore={() => {
-          setIsQuickMenuOpen(false);
-          setIsModStoreOpen(true);
+        onCatalogUpdated={() => {
+          loadPlatforms();
+          loadGenres();
+          loadGames();
         }}
       />
 
-      {/* INITIAL LAUNCH / HARDWARE PROVISIONING SETUP WIZARD */}
+      {/* INITIAL SETUP WIZARD MODAL */}
       <InitialSetupWizardModal
         isOpen={isSetupWizardOpen}
-        initialStep={setupWizardStep}
         totalGames={globalVaultTotal || totalGamesCount}
         onClose={() => setIsSetupWizardOpen(false)}
         onFinish={() => {
           loadGames();
           loadPlatforms();
+          loadInstalledCount();
         }}
-      />
-
-      {/* HOLOGRAPHIC TROPHY UNLOCK TOAST */}
-      <AchievementToast
-        achievement={unlockedAchievementToast}
-        onClose={() => setUnlockedAchievementToast(null)}
-        onViewDetails={() => setIsQuickMenuOpen(true)}
-      />
-
-      {/* THEME STUDIO & AMBIENCE GENERATOR MODAL */}
-      <ThemeStudioModal
-        isOpen={isThemeStudioOpen}
-        onClose={() => setIsThemeStudioOpen(false)}
       />
 
       {/* LOSSLESS ROM COMPRESSOR & MULTI-DISC M3U MODAL */}
       <RomCompressorModal
         isOpen={isCompressorOpen}
         onClose={() => setIsCompressorOpen(false)}
-      />
-
-      {/* OMNINET COUCH P2P NETPLAY MODAL */}
-      <NetplayLobbyModal
-        isOpen={isNetplayOpen}
-        onClose={() => setIsNetplayOpen(false)}
-      />
-
-      {/* OMNISYNC TIME-MACHINE SAVE MODAL */}
-      <SaveTimeMachineModal
-        isOpen={isSaveTimeMachineOpen}
-        onClose={() => setIsSaveTimeMachineOpen(false)}
-        game={selectedGame}
-      />
-
-      {/* MODS, ROMHACKS & ENHANCEMENTS STOREFRONT */}
-      <ModStoreModal
-        isOpen={isModStoreOpen}
-        onClose={() => setIsModStoreOpen(false)}
-        selectedGame={selectedGame}
       />
 
     </div>

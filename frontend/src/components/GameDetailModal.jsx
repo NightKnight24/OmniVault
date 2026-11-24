@@ -1,20 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { 
-  X, Star, Download, Film, Image as ImageIcon, Copy, Check, 
-  ExternalLink, Gamepad2, Calendar, Building, Sparkles, Magnet,
-  Play, Volume2, ShieldCheck, Wand2, FileCode, Wrench, Globe,
-  ArrowUpRight, Share2, Save, Heart, Sliders, CheckCircle2, AlertCircle, Zap, RefreshCw,
-  Trophy, RotateCcw, Clock, Plus, MessageSquare, Edit3, Send, Disc
+import {
+  X, Star, Download, Image as ImageIcon, Copy, Check,
+  Calendar, Building, Sparkles, Magnet, FolderOpen,
+  ShieldCheck, Globe, Heart, Sliders,
+  CheckCircle2, AlertCircle, Zap, RefreshCw, MessageSquare,
+  Edit3, Send, Link as LinkIcon, Play, Film, Lock, Unlock, Search, Cloud, HardDrive
 } from 'lucide-react';
-import PhysicalMedia3D from './PhysicalMedia3D';
-import { 
-  fetchGameById, fetchGameCheats, fetchGamePatchesAndMods, exportGameCheats, 
-  fetchSearchTemplates, rateGame, findWorkingMirror, importAndDownloadMirror,
-  fetchGameAchievements, fetchSaveSnapshots, createSaveSnapshot, rollbackSaveSnapshot,
-  getGameMirrors, fetchGameVideo, fetchGameReviews, submitGameReview, scanGameAchievements
+import {
+  fetchGameById, fetchSearchTemplates, rateGame, findWorkingMirror,
+  getGameMirrors, getGameVideos, fetchGameReviews, submitGameReview,
+  setGameSource, revealLocalPath, enrichGameTheGamesDb, fetchCloudTargets
 } from '../services/api';
-import { playClick, playFavoriteSound, playCoin, playVictorySound } from '../utils/soundEffects';
-import OmniPlayerModal from './OmniPlayerModal';
+import { playClick, playFavoriteSound, playCoin } from '../utils/soundEffects';
 
 const formatModalSize = (mb) => {
   if (!mb || mb <= 0) return 'Verified ROM';
@@ -23,104 +20,35 @@ const formatModalSize = (mb) => {
   return `${Number(mb).toFixed(1)} MB`;
 };
 
-export default function GameDetailModal({ 
-  game, 
-  onClose, 
-  onStartDownload, 
+export default function GameDetailModal({
+  game,
+  onClose,
+  onStartDownload,
   onToggleFavorite,
+  onGameUpdated,
   downloadState,
   initialTab = 'overview',
   onOpenSettings,
-  onOpenCheatLab,
-  onOpenModStore
+  sourcesVersion = 0
 }) {
   const dialogRef = useRef(null);
-  const getCleanVideoQuery = (rawTitle, rawPlatform, mode) => {
-    if (!rawTitle) return '';
-    let t = rawTitle;
-    t = t.replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
-    if (t.includes(', The')) {
-      t = 'The ' + t.replace(', The', '');
-    } else if (t.includes(', A')) {
-      t = 'A ' + t.replace(', A', '');
-    }
-    const platMap = {
-      'PS1': 'PlayStation',
-      'PS2': 'PS2',
-      'PS3': 'PS3',
-      'PS4': 'PS4',
-      'PSP': 'PSP',
-      'PSVita': 'PS Vita',
-      'Xbox360': 'Xbox 360',
-      'Xbox': 'Xbox',
-      'WiiU': 'Wii U',
-      'Switch': 'Nintendo Switch',
-      'GameCube': 'GameCube',
-      'N64': 'Nintendo 64',
-      'SNES': 'Super Nintendo',
-      'NES': 'NES',
-      'Genesis': 'Sega Genesis',
-      'Dreamcast': 'Dreamcast',
-      'Saturn': 'Sega Saturn',
-      '3DS': 'Nintendo 3DS',
-      'NDS': 'Nintendo DS',
-      'GBA': 'Game Boy Advance',
-      'GBC': 'Game Boy Color',
-      'GB': 'Game Boy'
-    };
-    const pName = platMap[rawPlatform] || rawPlatform || '';
-    if (mode === 'gameplay') {
-      return `${t} ${pName} 60fps gameplay longplay`.trim();
-    } else {
-      return `${t} ${pName} official launch trailer`.trim();
-    }
-  };
 
-  const [modalTab, setModalTab] = useState(initialTab); // 'overview', 'cheats', 'patches', 'mods', 'sources'
-  const [activeMediaTab, setActiveMediaTab] = useState('trailer'); // 'trailer', 'boxart', 'screenshots'
+  const [modalTab, setModalTab] = useState(initialTab); // 'overview', 'sources'
+  const [activeMediaTab, setActiveMediaTab] = useState('boxart'); // 'boxart', 'screenshots'
   const [selectedScreenshot, setSelectedScreenshot] = useState(0);
-  const [isPlayingVideo, setIsPlayingVideo] = useState(false);
-  const [videoMode, setVideoMode] = useState('gameplay'); // 'gameplay' | 'trailer'
-  const [videoEmbedUrl, setVideoEmbedUrl] = useState(null);
-  const [loadingVideo, setLoadingVideo] = useState(false);
-
-  const handlePlayVideo = async (mode) => {
-    setVideoMode(mode);
-    setIsPlayingVideo(true);
-    setLoadingVideo(true);
-    try {
-      const res = await fetchGameVideo(game.id, mode);
-      if (res?.embed_url) {
-        setVideoEmbedUrl(res.embed_url);
-      }
-    } catch (err) {
-      console.error("Failed to load video:", err);
-    } finally {
-      setLoadingVideo(false);
-    }
-  };
   const [copiedMagnet, setCopiedMagnet] = useState(false);
-  const [copiedCheatId, setCopiedCheatId] = useState(null);
-  const [showPlayer, setShowPlayer] = useState(false);
-  const [exportMessage, setExportMessage] = useState(null);
+  const [copiedPath, setCopiedPath] = useState(false);
   const [currentUserRating, setCurrentUserRating] = useState(null);
   const [enrichedDescription, setEnrichedDescription] = useState(null);
-  
-  // Cheats & Patches State
-  const [cheats, setCheats] = useState([]);
-  const [patches, setPatches] = useState([]);
-  const [mods, setMods] = useState([]);
+  const [webHelpers, setWebHelpers] = useState([]);
+  const [refreshingMeta, setRefreshingMeta] = useState(false);
   const [customTemplates, setCustomTemplates] = useState([]);
-  const [loadingExtras, setLoadingExtras] = useState(false);
 
-  // RetroAchievements & Time-Machine State
-  const [achievements, setAchievements] = useState(null);
-  const [achievementsLoading, setAchievementsLoading] = useState(false);
-  const [isScanningSaves, setIsScanningSaves] = useState(false);
-  const [snapshots, setSnapshots] = useState([]);
-  const [snapshotsLoading, setSnapshotsLoading] = useState(false);
-  const [newSnapshotLabel, setNewSnapshotLabel] = useState('');
-  const [detailToast, setDetailToast] = useState(null);
+  // Custom Source URL Attachment State
+  const [customDirectUrl, setCustomDirectUrl] = useState('');
+  const [customMagnetUri, setCustomMagnetUri] = useState('');
+  const [savingCustomSource, setSavingCustomSource] = useState(false);
+  const [sourceSavedMsg, setSourceSavedMsg] = useState(null);
 
   // Community Written Reviews State
   const [reviewsData, setReviewsData] = useState(null);
@@ -132,16 +60,71 @@ export default function GameDetailModal({
   const [newReviewText, setNewReviewText] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
 
+  // Live Mirror & Torrent Resolution State
+  const [checkingMirror, setCheckingMirror] = useState(false);
+  const [liveMirror, setLiveMirror] = useState(null);
+  const [mirrorError, setMirrorError] = useState(null);
+  const [romMirrors, setRomMirrors] = useState([]);
+  const [loadingMirrors, setLoadingMirrors] = useState(false);
+  const [realdebridActive, setRealdebridActive] = useState(false);
+  const [rdUnlockedCount, setRdUnlockedCount] = useState(0);
+
+  // Trailer & Gameplay Videos State
+  const [gameVideos, setGameVideos] = useState({ trailer: null, gameplay: null });
+  const [loadingVideos, setLoadingVideos] = useState(false);
+  const [copiedVideoUrl, setCopiedVideoUrl] = useState(false);
+
+  // Per-Source In-App Community Scraping State
+  const [scrapingSourceId, setScrapingSourceId] = useState(null);
+  const [selectedCommunitySource, setSelectedCommunitySource] = useState(null);
+  const [communitySourceMirrors, setCommunitySourceMirrors] = useState([]);
+  const [communitySourceError, setCommunitySourceError] = useState(null);
+  const [copiedHelperKey, setCopiedHelperKey] = useState(null);
+
+  // Destination Target State (Local Drive, iCloud Drive, Google Drive, OneDrive)
+  const [cloudTargetsInfo, setCloudTargetsInfo] = useState({ default_target: 'local', targets: [] });
+  const [selectedCloudTarget, setSelectedCloudTarget] = useState('local');
+
   useEffect(() => {
     if (game?.id) {
       setEnrichedDescription(null);
+      setWebHelpers(game.web_search_helpers || []);
+      setCustomDirectUrl(game.direct_download_url || '');
+      setCustomMagnetUri(game.magnet_uri || '');
+      setSourceSavedMsg(null);
+      setLiveMirror(null);
+      setMirrorError(null);
+      setGameVideos({ trailer: null, gameplay: null });
+      setLoadingVideos(true);
+      setCopiedVideoUrl(false);
+      setScrapingSourceId(null);
+      setSelectedCommunitySource(null);
+      setCommunitySourceMirrors([]);
+      setCommunitySourceError(null);
+      setCopiedHelperKey(null);
+
       fetchGameById(game.id)
         .then(detail => {
-          if (detail && detail.description) {
-            setEnrichedDescription(detail.description);
+          if (detail) {
+            if (detail.description) setEnrichedDescription(detail.description);
+            if (detail.web_search_helpers) setWebHelpers(detail.web_search_helpers);
+            if (detail.direct_download_url !== undefined) setCustomDirectUrl(detail.direct_download_url || '');
+            if (detail.magnet_uri !== undefined) setCustomMagnetUri(detail.magnet_uri || '');
           }
         })
         .catch(console.error);
+
+      getGameVideos(game.id)
+        .then(res => {
+          if (res) {
+            setGameVideos({
+              trailer: res.trailer || null,
+              gameplay: res.gameplay || null,
+            });
+          }
+        })
+        .catch(console.error)
+        .finally(() => setLoadingVideos(false));
 
       setLoadingReviews(true);
       fetchGameReviews(game.id)
@@ -153,23 +136,6 @@ export default function GameDetailModal({
         .finally(() => setLoadingReviews(false));
     }
   }, [game?.id]);
-
-  useEffect(() => {
-    if (game && modalTab === 'trophies' && !achievements) {
-      setAchievementsLoading(true);
-      fetchGameAchievements(game.id)
-        .then(data => setAchievements(data))
-        .catch(console.error)
-        .finally(() => setAchievementsLoading(false));
-    }
-    if (game && modalTab === 'saves' && snapshots.length === 0) {
-      setSnapshotsLoading(true);
-      fetchSaveSnapshots(game.id)
-        .then(data => setSnapshots(data.snapshots || []))
-        .catch(console.error)
-        .finally(() => setSnapshotsLoading(false));
-    }
-  }, [game, modalTab]);
 
   const handleSubmitReview = async (e) => {
     e.preventDefault();
@@ -189,7 +155,6 @@ export default function GameDetailModal({
         const updated = await fetchGameReviews(game.id);
         setReviewsData(updated);
         setReviews(updated.reviews || []);
-        setDetailToast({ title: 'Review Saved', message: 'Your review and rating were saved to the vault.' });
       }
     } catch (err) {
       console.error('Failed to submit review:', err);
@@ -198,42 +163,18 @@ export default function GameDetailModal({
     }
   };
 
-  const handleScanAchievements = async () => {
-    if (!game) return;
-    setIsScanningSaves(true);
-    playClick();
-    try {
-      const res = await scanGameAchievements(game.id);
-      const updated = await fetchGameAchievements(game.id);
-      setAchievements(updated);
-      if (res?.should_chime) {
-        playVictorySound();
-      } else {
-        playCoin();
-      }
-      setDetailToast({
-        title: 'Save Data Scanned',
-        message: res.message || `Scanned ${res.active_saves_found || 0} save files. Progress is up to date.`
-      });
-    } catch (err) {
-      console.error('Failed to scan achievements:', err);
-    } finally {
-      setIsScanningSaves(false);
-    }
-  };
-
-  // Live Mirror & Torrentio Resolution State
-  const [checkingMirror, setCheckingMirror] = useState(false);
-  const [liveMirror, setLiveMirror] = useState(null);
-  const [mirrorError, setMirrorError] = useState(null);
-  const [romMirrors, setRomMirrors] = useState([]);
-  const [loadingMirrors, setLoadingMirrors] = useState(false);
-
-  const handleDownloadMirror = async (mirror) => {
+  const handleDownloadMirror = (mirror) => {
     if (!mirror || !game) return;
     playClick();
     if (onStartDownload) {
-      onStartDownload(game, 'direct', mirror.direct_url, mirror.filename, mirror.source_name);
+      onStartDownload(
+        game,
+        'direct',
+        mirror.direct_url,
+        mirror.filename,
+        mirror.source_name,
+        selectedCloudTarget
+      );
     }
     onClose();
   };
@@ -257,77 +198,131 @@ export default function GameDetailModal({
     }
   };
 
-  const handleDownloadFromLiveMirror = async () => {
+  const handleDownloadFromLiveMirror = () => {
     if (!liveMirror || !game) return;
     playClick();
     if (onStartDownload) {
-      onStartDownload(game, 'direct', liveMirror.direct_url, liveMirror.filename, liveMirror.source_name);
+      onStartDownload(
+        game,
+        'direct',
+        liveMirror.direct_url,
+        liveMirror.filename,
+        liveMirror.source_name,
+        selectedCloudTarget
+      );
     }
     onClose();
   };
 
-  // Synchronize modal state with dialog element
+  const handleRefreshTheGamesDb = async () => {
+    if (!game) return;
+    playClick();
+    setRefreshingMeta(true);
+    try {
+      const res = await enrichGameTheGamesDb(game.id);
+      if (res?.enriched && res.game) {
+        if (res.game.description) setEnrichedDescription(res.game.description);
+        if (onGameUpdated) {
+          onGameUpdated({
+            ...game,
+            ...res.game,
+            web_search_helpers: webHelpers.length > 0 ? webHelpers : game.web_search_helpers,
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to refresh metadata from TheGamesDB:', err);
+    } finally {
+      setRefreshingMeta(false);
+    }
+  };
+
+  const handleSaveCustomSource = async (e, startImmediate = false) => {
+    if (e) e.preventDefault();
+    if (!game) return;
+    setSavingCustomSource(true);
+    setSourceSavedMsg(null);
+    try {
+      const res = await setGameSource(game.id, {
+        direct_download_url: customDirectUrl.trim(),
+        magnet_uri: customMagnetUri.trim()
+      });
+      const updatedGame = {
+        ...game,
+        direct_download_url: res.direct_download_url || null,
+        magnet_uri: res.magnet_uri || null
+      };
+      if (onGameUpdated) onGameUpdated(updatedGame);
+      setSourceSavedMsg('Custom source link saved to catalog!');
+
+      if (startImmediate && (customDirectUrl.trim() || customMagnetUri.trim())) {
+        const target = customDirectUrl.trim() || customMagnetUri.trim();
+        const type = target.startsWith('magnet:') || target.endsWith('.torrent') ? 'magnet' : 'direct';
+        if (onStartDownload) {
+          onStartDownload(updatedGame, type, target, null, 'Custom Source', selectedCloudTarget);
+        }
+        onClose();
+      }
+    } catch (err) {
+      alert(`Failed to save custom source: ${err.message}`);
+    } finally {
+      setSavingCustomSource(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!game?.id) return;
+    let cancelled = false;
+    fetchCloudTargets()
+      .then((res) => {
+        if (cancelled || !res) return;
+        setCloudTargetsInfo(res);
+        setSelectedCloudTarget(res.default_target || 'local');
+      })
+      .catch(() => {});
+    setRomMirrors([]);
+    setLoadingMirrors(true);
+    getGameMirrors(game.id)
+      .then(res => {
+        if (cancelled) return;
+        setRealdebridActive(Boolean(res?.realdebrid_active));
+        setRdUnlockedCount(Number(res?.realdebrid_unlocked_count || 0));
+        const list = res?.mirrors || res?.streams || [];
+        setRomMirrors(list);
+        if (list.length > 0) {
+          setLiveMirror(list[0]);
+        }
+      })
+      .catch(err => {
+        if (!cancelled) console.error('ROM mirrors discovery error:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingMirrors(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [game?.id, sourcesVersion]);
+
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
 
     if (game && !dialog.open) {
       dialog.showModal();
-      setModalTab(initialTab);
-      setActiveMediaTab('trailer');
+      setModalTab(initialTab === 'sources' ? 'sources' : 'overview');
+      setActiveMediaTab('boxart');
       setSelectedScreenshot(0);
-      setIsPlayingVideo(false);
-      setVideoMode('gameplay');
-      setVideoEmbedUrl(null);
-      setLoadingVideo(false);
-      setExportMessage(null);
       setCurrentUserRating(game.user_rating || null);
       setEnrichedDescription(game.description || null);
 
-      // Load enriched metadata/synopsis, cheats, patches, mods, and custom search templates
-      setLoadingExtras(true);
-      Promise.all([
-        fetchGameById(game.id).catch(() => null),
-        fetchGameCheats(game.id).catch(() => ({ cheats: [] })),
-        fetchGamePatchesAndMods(game.id).catch(() => ({ patches: [], mods: [] })),
-        fetchSearchTemplates().catch(() => ({ templates: [] }))
-      ]).then(([fullGame, cheatsRes, extrasRes, templatesRes]) => {
-        if (fullGame?.description) {
-          setEnrichedDescription(fullGame.description);
-        }
-        setCheats(cheatsRes.cheats || []);
-        setPatches(extrasRes.patches || []);
-        setMods(extrasRes.mods || []);
-        setCustomTemplates(templatesRes.templates || []);
-      }).finally(() => {
-        setLoadingExtras(false);
-      });
-
-      // Live ROM Mirrors & P2P Aggregator
-      setRomMirrors([]);
-      setLoadingMirrors(true);
-      getGameMirrors(game.id)
-        .then(res => {
-          const list = res?.mirrors || res?.streams;
-          if (list) {
-            setRomMirrors(list);
-            if (list.length > 0 && !liveMirror) {
-              setLiveMirror(list[0]);
-            }
-          }
-        })
-        .catch(err => {
-          console.error("ROM mirrors discovery error:", err);
-        })
-        .finally(() => {
-          setLoadingMirrors(false);
-        });
-
+      fetchSearchTemplates()
+        .then(res => setCustomTemplates(res.templates || []))
+        .catch(() => setCustomTemplates([]));
     } else if (!game && dialog.open) {
       dialog.close();
     }
 
-    // Modern Web Guidance: Light-dismiss fallback
     const handleBackdropClick = (event) => {
       if (event.target !== dialog) return;
       const rect = dialog.getBoundingClientRect();
@@ -369,19 +364,20 @@ export default function GameDetailModal({
     }
   };
 
-  const handleCopyCheat = (cheat) => {
-    navigator.clipboard.writeText(cheat.code);
-    setCopiedCheatId(cheat.id);
-    setTimeout(() => setCopiedCheatId(null), 2000);
+  const resolvedLocalPath = game.path || (downloadState && downloadState.destination_path) || '';
+
+  const handleCopyPath = () => {
+    if (resolvedLocalPath) {
+      navigator.clipboard.writeText(resolvedLocalPath);
+      setCopiedPath(true);
+      setTimeout(() => setCopiedPath(false), 2000);
+    }
   };
 
-  const handleExportCheats = async () => {
-    try {
-      const res = await exportGameCheats(game.id);
-      setExportMessage(res.message);
-      setTimeout(() => setExportMessage(null), 3500);
-    } catch (err) {
-      alert(`Could not export cheats: ${err.message}`);
+  const handleRevealInFinder = () => {
+    playClick();
+    if (resolvedLocalPath) {
+      revealLocalPath(resolvedLocalPath).catch(() => {});
     }
   };
 
@@ -391,26 +387,105 @@ export default function GameDetailModal({
     try {
       await rateGame(game.id, score);
     } catch (err) {
-      console.error("Failed to save rating:", err);
+      console.error('Failed to save rating:', err);
     }
+  };
+
+  const handleScrapeCommunitySource = async (helper) => {
+    if (!game || !helper) return;
+    playClick();
+
+    if (helper.can_scrape === false || !helper.source_id) {
+      const targetUrl = helper.url || '';
+      if (targetUrl) {
+        navigator.clipboard?.writeText(targetUrl).catch(() => {});
+        const key = helper.source_id || helper.name;
+        setCopiedHelperKey(key);
+        setTimeout(() => setCopiedHelperKey(null), 2200);
+      }
+      return;
+    }
+
+    setScrapingSourceId(helper.source_id);
+    setSelectedCommunitySource(helper);
+    setCommunitySourceError(null);
+    setCommunitySourceMirrors([]);
+
+    try {
+      const res = await getGameMirrors(game.id, helper.source_id);
+      if (res?.realdebrid_active !== undefined) {
+        setRealdebridActive(Boolean(res.realdebrid_active));
+      }
+      const list = res?.mirrors || res?.streams || [];
+      setCommunitySourceMirrors(list);
+
+      if (list.length > 0) {
+        setRomMirrors((prev) => {
+          const seen = new Set(prev.map((m) => m.direct_url));
+          const merged = [...prev];
+          for (const item of list) {
+            if (item?.direct_url && !seen.has(item.direct_url)) {
+              merged.push(item);
+              seen.add(item.direct_url);
+            }
+          }
+          if (merged.length > 0 && !liveMirror) {
+            setLiveMirror(merged[0]);
+          }
+          return merged;
+        });
+      }
+    } catch (err) {
+      setCommunitySourceError(err.message || `Failed to scrape ${helper.name}`);
+    } finally {
+      setScrapingSourceId(null);
+    }
+  };
+
+  const handleCopyHelperUrl = (key, targetUrl) => {
+    if (!targetUrl) return;
+    playClick();
+    navigator.clipboard?.writeText(targetUrl).catch(() => {});
+    setCopiedHelperKey(key);
+    setTimeout(() => setCopiedHelperKey(null), 2200);
   };
 
   const screenshots = game.screenshots || [];
   const isDownloading = downloadState && downloadState.status === 'downloading';
   const isCompleted = (downloadState && downloadState.status === 'completed') || Boolean(game.path);
 
-  // Alternative Sites Search Links
   const quotedTitle = encodeURIComponent(game.title);
-  const altSources = [
-    { name: "BlueRoms (Direct CDN)", url: `https://www.blueroms.ws/${game.platform.toLowerCase()}`, desc: "Direct high-speed CDN for 3DS, Vita, PSP, NDS, PS1-4, Xbox, Nintendo" },
-    { name: "ConsoleRoms (Direct CDN)", url: `https://www.consoleroms.com/search?search_term_string=${quotedTitle}`, desc: "Clean console ROMs directory with direct Cloudflare CDN downloads" },
-    { name: "DLPSGame (PKG Mirror)", url: `https://dlpsgame.com/?s=${quotedTitle}`, desc: "Dedicated high-speed 1fichier & MediaFire mirror for PS4 & PS3 PKGs" },
-    { name: "RomsGames", url: `https://www.romsgames.net/search/?q=${quotedTitle}`, desc: "Verified retro ROM portal & preservation releases" },
-    { name: "RomsFun", url: `https://romsfun.com/?s=${quotedTitle}`, desc: "Multi-region versions (USA, Europe, Japan, Revision 1)" },
-    { name: "RomsLab", url: `https://romslab.com/?s=${quotedTitle}`, desc: "Modern switch, handheld & retro releases" },
-    { name: "Ziperto", url: `https://www.ziperto.com/?s=${quotedTitle}`, desc: "Specialized 3DS (CIA), Switch (NSP) & Vita (VPK) archive" },
-    { name: "Vimm's Lair", url: `https://vimm.net/vault/?p=list&q=${quotedTitle}`, desc: "Classic The Vault preservation archive" }
-  ];
+  const quotedPlatform = encodeURIComponent(game.platform_name || game.platform || '');
+  const activeHelpers = (webHelpers && webHelpers.length > 0)
+    ? webHelpers
+    : [
+        {
+          source_id: 'archive-org',
+          name: 'Internet Archive (Archive.org)',
+          adapter: 'archive_org',
+          can_scrape: true,
+          supports_direct_download: true,
+          url: 'https://archive.org',
+          description: 'Public archival collections on Archive.org',
+        },
+      ];
+
+  const resolveTemplateUrl = (tplStr) => {
+    return (tplStr || '')
+      .replace(/\{title\}/g, quotedTitle)
+      .replace(/\{platform\}/g, quotedPlatform);
+  };
+
+  const coverUrl = (
+    game.box_art_2d
+    && !game.box_art_2d.includes('libretro-thumbnails')
+    && (
+      game.box_art_2d.includes('thegamesdb.net')
+      || !['Switch', 'Switch2', 'Xbox360', 'PS3', 'PS4', 'PS5', 'PSVita', '3DS', 'Xbox', 'WiiU', 'Windows', 'macOS', 'Arcade', 'Saturn', 'Dreamcast', 'Wii'].includes(game.platform)
+    )
+  )
+    ? game.box_art_2d
+    : `/api/covers/image?title=${encodeURIComponent(game.title)}&platform=${encodeURIComponent(game.platform)}`;
 
   return (
     <dialog
@@ -421,98 +496,38 @@ export default function GameDetailModal({
       className="m-auto bg-transparent p-0 max-w-4xl w-[calc(100vw-1.5rem)] max-h-[calc(100dvh-1.5rem)] rounded-3xl outline-none shadow-2xl backdrop:bg-black/80 backdrop:backdrop-blur-md"
     >
       <div className="relative bg-[#0d1322] border border-white/15 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[calc(100dvh-1.5rem)]">
-        
-        {/* Header Bar with Navigation Tabs and Close Button */}
+
+        {/* Header Bar with 2 Focused Tabs & Close Button */}
         <div className="flex items-center justify-between gap-2 border-b border-white/10 px-4 sm:px-6 py-3 bg-slate-950/90 z-20 shrink-0">
           <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none min-w-0">
             <button
               onClick={() => setModalTab('overview')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 modalTab === 'overview'
                   ? 'bg-cyan-500 text-black shadow-glow-cyan'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
               }`}
             >
-              <Film className="w-3.5 h-3.5" />
-              <span>Overview</span>
-            </button>
-
-            <button
-              onClick={() => setModalTab('cheats')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                modalTab === 'cheats'
-                  ? 'bg-amber-400 text-black shadow-md'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <Wand2 className="w-3.5 h-3.5" />
-              <span>Cheats ({cheats.length})</span>
-            </button>
-
-            <button
-              onClick={() => setModalTab('patches')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                modalTab === 'patches'
-                  ? 'bg-violet-400 text-black shadow-md'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <FileCode className="w-3.5 h-3.5" />
-              <span>Patches ({patches.length})</span>
-            </button>
-
-            <button
-              onClick={() => setModalTab('mods')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                modalTab === 'mods'
-                  ? 'bg-emerald-400 text-black shadow-md'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <Wrench className="w-3.5 h-3.5" />
-              <span>Mods ({mods.length})</span>
+              <Download className="w-3.5 h-3.5" />
+              <span>Overview & Downloads</span>
             </button>
 
             <button
               onClick={() => setModalTab('sources')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 modalTab === 'sources'
                   ? 'bg-sky-400 text-black shadow-md'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
               }`}
             >
               <Globe className="w-3.5 h-3.5" />
-              <span>Web Sources</span>
-            </button>
-
-            <button
-              onClick={() => setModalTab('trophies')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                modalTab === 'trophies'
-                  ? 'bg-amber-400 text-black shadow-md'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <Trophy className="w-3.5 h-3.5" />
-              <span>Trophies</span>
-            </button>
-
-            <button
-              onClick={() => setModalTab('saves')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                modalTab === 'saves'
-                  ? 'bg-emerald-400 text-black shadow-md'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Time-Machine</span>
+              <span>Web Sources & Custom Link</span>
             </button>
           </div>
 
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/20 flex items-center justify-center transition-all hover:scale-110"
+            className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/20 flex items-center justify-center transition-all hover:scale-110 cursor-pointer"
             aria-label="Close dialog"
           >
             <X className="w-4 h-4" />
@@ -521,194 +536,154 @@ export default function GameDetailModal({
 
         {/* Scrollable Modal Content */}
         <div className="overflow-y-auto overscroll-contain flex-1">
-          
-          {/* TAB 1: OVERVIEW */}
+
+          {/* TAB 1: OVERVIEW & DOWNLOADS */}
           {modalTab === 'overview' && (
             <div>
-              {/* MEDIA SECTION: Video Trailer, Gameplay & Gallery Tabs */}
+              {/* BOX ART, TRAILER, GAMEPLAY & SCREENSHOT SHOWCASE */}
               <div className="relative bg-slate-950 border-b border-white/10">
-                
-                {/* Media Switcher */}
-                <div className="absolute top-3 left-3 max-w-[calc(100%-1.5rem)] z-10 flex flex-wrap items-center gap-1 p-1 rounded-xl bg-black/75 backdrop-blur-md border border-white/15">
-                  <button
-                    onClick={() => setActiveMediaTab('trailer')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      activeMediaTab === 'trailer'
-                        ? 'bg-cyan-500 text-black shadow-glow-cyan'
-                        : 'text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    <Gamepad2 className="w-3.5 h-3.5" />
-                    <span>Gameplay & Trailer</span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveMediaTab('boxart')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      activeMediaTab === 'boxart'
-                        ? 'bg-cyan-500 text-black shadow-glow-cyan'
-                        : 'text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    <ImageIcon className="w-3.5 h-3.5" />
-                    <span>Box Art</span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveMediaTab('physical3d')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                      activeMediaTab === 'physical3d'
-                        ? 'bg-cyan-500 text-black shadow-glow-cyan'
-                        : 'text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    <Disc className="w-3.5 h-3.5" />
-                    <span>3D Cart / Disc</span>
-                  </button>
-
-                  {screenshots.length > 0 && (
+                <div className="px-4 py-2 bg-slate-950/95 border-b border-white/10 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1">
                     <button
-                      onClick={() => setActiveMediaTab('screenshots')}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                        activeMediaTab === 'screenshots'
+                      onClick={() => setActiveMediaTab('boxart')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        activeMediaTab === 'boxart'
                           ? 'bg-cyan-500 text-black shadow-glow-cyan'
-                          : 'text-slate-300 hover:text-white'
+                          : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
                       }`}
                     >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Screenshots ({screenshots.length})</span>
+                      <ImageIcon className="w-3.5 h-3.5" />
+                      <span>Box Art</span>
                     </button>
-                  )}
+
+                    <button
+                      onClick={() => setActiveMediaTab('trailer')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        activeMediaTab === 'trailer'
+                          ? 'bg-rose-500 text-white shadow-md'
+                          : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      }`}
+                    >
+                      <Film className="w-3.5 h-3.5" />
+                      <span>Trailer</span>
+                    </button>
+
+                    <button
+                      onClick={() => setActiveMediaTab('gameplay')}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        activeMediaTab === 'gameplay'
+                          ? 'bg-emerald-500 text-black shadow-md'
+                          : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      }`}
+                    >
+                      <Play className="w-3.5 h-3.5" />
+                      <span>Gameplay</span>
+                    </button>
+
+                    {screenshots.length > 0 && (
+                      <button
+                        onClick={() => setActiveMediaTab('screenshots')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          activeMediaTab === 'screenshots'
+                            ? 'bg-cyan-500 text-black shadow-glow-cyan'
+                            : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                        }`}
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Screenshots ({screenshots.length})</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {(activeMediaTab === 'trailer' || activeMediaTab === 'gameplay') && (() => {
+                    const activeVid = activeMediaTab === 'trailer' ? gameVideos.trailer : gameVideos.gameplay;
+                    if (!activeVid) return null;
+                    return (
+                      <div className="flex items-center gap-2 min-w-0 max-w-sm">
+                        <span className="text-[11px] text-slate-400 truncate">{activeVid.title}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (activeVid.watch_url) {
+                              navigator.clipboard?.writeText(activeVid.watch_url).catch(() => {});
+                              setCopiedVideoUrl(true);
+                              setTimeout(() => setCopiedVideoUrl(false), 2000);
+                            }
+                          }}
+                          className="text-[11px] font-bold text-cyan-400 hover:text-cyan-300 flex items-center gap-1 shrink-0 cursor-pointer"
+                        >
+                          {copiedVideoUrl ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedVideoUrl ? 'Copied' : 'Copy Link'}</span>
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
 
-                {/* Viewport */}
-                <div className="aspect-video w-full max-h-[460px] bg-black flex items-center justify-center overflow-hidden relative">
-                  {activeMediaTab === 'trailer' && (
-                    isPlayingVideo ? (
-                      <div className="w-full h-full relative bg-black flex flex-col">
-                        <div className="px-4 py-2 bg-slate-900 border-b border-white/10 flex items-center justify-between text-xs z-20">
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => handlePlayVideo('gameplay')}
-                              className={`px-3 py-1 rounded-lg font-bold text-xs transition-all cursor-pointer ${
-                                videoMode === 'gameplay' 
-                                  ? 'bg-cyan-500 text-black shadow-glow-cyan' 
-                                  : 'bg-slate-800 text-slate-300 hover:text-white'
-                              }`}
-                            >
-                              🎮 60FPS Gameplay Showcase
-                            </button>
-                            <button
-                              onClick={() => handlePlayVideo('trailer')}
-                              className={`px-3 py-1 rounded-lg font-bold text-xs transition-all cursor-pointer ${
-                                videoMode === 'trailer' 
-                                  ? 'bg-cyan-500 text-black shadow-glow-cyan' 
-                                  : 'bg-slate-800 text-slate-300 hover:text-white'
-                              }`}
-                            >
-                              🎬 Official Trailer
-                            </button>
-                          </div>
-                          <button
-                            onClick={() => {
-                              setIsPlayingVideo(false);
-                              setVideoEmbedUrl(null);
-                            }}
-                            className="text-slate-400 hover:text-white text-xs px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
-                          >
-                            ✕ Close Player
-                          </button>
-                        </div>
-                        {loadingVideo ? (
-                          <div className="w-full flex-1 flex flex-col items-center justify-center bg-black gap-3">
-                            <div className="w-8 h-8 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
-                            <span className="text-xs text-slate-300 font-medium">
-                              Resolving verified {videoMode === 'gameplay' ? '60FPS gameplay showcase' : 'official trailer'}...
-                            </span>
-                          </div>
-                        ) : videoEmbedUrl ? (
-                          <iframe
-                            src={videoEmbedUrl}
-                            title={`${game.title} Internal Video Showcase`}
-                            className="w-full flex-1 border-0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                            referrerPolicy="no-referrer-when-downgrade"
-                            allowFullScreen
-                          />
-                        ) : (
-                          <div className="w-full flex-1 flex flex-col items-center justify-center bg-black gap-2">
-                            <span className="text-xs text-slate-400">Video showcase could not be loaded</span>
-                            <button
-                              onClick={() => handlePlayVideo(videoMode)}
-                              className="text-xs text-cyan-400 hover:underline"
-                            >
-                              Retry
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="w-full h-full relative flex items-center justify-center overflow-hidden bg-gradient-to-t from-slate-950 via-slate-900 to-black">
-                        {/* High-res in-game backdrop with blur */}
-                        <img
-                          src={game.backdrop || (game.box_art_2d && !game.box_art_2d.includes('libretro-thumbnails/MAME') ? game.box_art_2d : `/api/covers/image?title=${encodeURIComponent(game.title)}&platform=${encodeURIComponent(game.platform)}`)}
-                          alt={`${game.title} Gameplay Showcase`}
-                          className="absolute inset-0 w-full h-full object-cover opacity-35 blur-sm scale-105"
-                          onError={(e) => { e.currentTarget.src = `/api/covers/image?title=${encodeURIComponent(game.title)}&platform=${encodeURIComponent(game.platform)}`; }}
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#0b101b] via-[#0b101b]/70 to-transparent" />
-
-                        {/* Interactive Gameplay Showcase Controls */}
-                        <div className="relative z-10 flex flex-col items-center text-center p-6 max-w-lg">
-                          <div className="w-16 h-16 rounded-2xl bg-cyan-500/20 border border-cyan-400/50 flex items-center justify-center mb-4 shadow-glow-cyan backdrop-blur-md">
-                            <Gamepad2 className="w-8 h-8 text-cyan-400" />
-                          </div>
-                          <h3 className="font-display font-black text-xl text-white mb-2 tracking-tight drop-shadow-md">
-                            {game.title}
-                          </h3>
-                          <p className="text-xs text-slate-300 mb-6 font-medium max-w-md">
-                            Experience in-app 60 FPS gameplay, speedruns, and official game trailers directly inside OmniVault.
-                          </p>
-
-                          <div className="flex flex-wrap items-center justify-center gap-3">
-                            <button
-                              onClick={() => handlePlayVideo('gameplay')}
-                              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-black text-xs shadow-glow-cyan hover:scale-105 transition-all cursor-pointer"
-                            >
-                              <Play className="w-4 h-4 fill-black text-black" />
-                              <span>Play 60FPS Gameplay</span>
-                            </button>
-
-                            <button
-                              onClick={() => handlePlayVideo('trailer')}
-                              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/10 font-bold text-xs hover:scale-105 transition-all cursor-pointer"
-                            >
-                              <Film className="w-4 h-4 text-cyan-400" />
-                              <span>Play Official Trailer</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  )}
-
+                <div className="h-72 sm:h-80 w-full bg-black flex items-center justify-center overflow-hidden relative">
                   {activeMediaTab === 'boxart' && (
-                    <div className="w-full h-full p-8 flex items-center justify-center gap-8 bg-gradient-to-b from-slate-900 to-black">
-                      <div className="text-center">
-                        <span className="text-[11px] font-semibold text-slate-400 block mb-2 uppercase tracking-wider">
-                          Official 2D Cover Art
-                        </span>
-                        <img
-                          src={game.box_art_2d && !game.box_art_2d.includes('libretro-thumbnails') && !['Switch', 'Xbox360', 'PS3', 'PS4', 'PSVita', '3DS', 'Xbox', 'WiiU', 'Arcade', 'Saturn', 'Dreamcast', 'Wii'].includes(game.platform) ? game.box_art_2d : `/api/covers/image?title=${encodeURIComponent(game.title)}&platform=${encodeURIComponent(game.platform)}`}
-                          alt={`${game.title} 2D Box Art`}
-                          className="max-h-72 rounded-xl shadow-2xl border border-white/20 object-contain hover:scale-105 transition-transform"
-                          onError={(e) => { e.currentTarget.src = `/api/covers/image?title=${encodeURIComponent(game.title)}&platform=${encodeURIComponent(game.platform)}`; }}
-                        />
-                      </div>
+                    <div className="w-full h-full relative flex items-center justify-center p-6 overflow-hidden">
+                      <img
+                        src={game.backdrop || coverUrl}
+                        alt=""
+                        className="absolute inset-0 w-full h-full object-cover opacity-30 blur-md scale-110"
+                        onError={(e) => { e.currentTarget.src = `/api/covers/image?title=${encodeURIComponent(game.title)}&platform=${encodeURIComponent(game.platform)}`; }}
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#0d1322] via-black/50 to-black/70" />
+                      <img
+                        src={coverUrl}
+                        alt={`${game.title} Box Art`}
+                        className="relative z-10 max-h-60 sm:max-h-68 rounded-xl shadow-2xl border border-white/20 object-contain hover:scale-105 transition-transform"
+                        onError={(e) => { e.currentTarget.src = `/api/covers/image?title=${encodeURIComponent(game.title)}&platform=${encodeURIComponent(game.platform)}`; }}
+                      />
                     </div>
                   )}
 
-                  {activeMediaTab === 'screenshots' && (
+                  {(activeMediaTab === 'trailer' || activeMediaTab === 'gameplay') && (() => {
+                    const activeVid = activeMediaTab === 'trailer' ? gameVideos.trailer : gameVideos.gameplay;
+                    if (loadingVideos && !activeVid) {
+                      return (
+                        <div className="flex flex-col items-center gap-2 text-xs text-slate-400">
+                          <RefreshCw className="w-5 h-5 animate-spin text-cyan-400" />
+                          <span>Loading {activeMediaTab} video...</span>
+                        </div>
+                      );
+                    }
+                    if (activeVid?.embed_url) {
+                      return (
+                        <iframe
+                          key={activeVid.embed_url}
+                          src={activeVid.embed_url}
+                          title={activeVid.title || `${game.title} ${activeMediaTab}`}
+                          referrerPolicy="strict-origin-when-cross-origin"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                          className="w-full h-full border-0"
+                        />
+                      );
+                    }
+                    const fallbackYt = `https://www.youtube.com/results?search_query=${quotedTitle}+${quotedPlatform}+${activeMediaTab}`;
+                    return (
+                      <div className="text-center space-y-2.5 p-6">
+                        <Film className="w-8 h-8 text-slate-500 mx-auto" />
+                        <p className="text-xs text-slate-400">No direct video embed resolved for this title.</p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard?.writeText(fallbackYt).catch(() => {});
+                            setCopiedVideoUrl(true);
+                            setTimeout(() => setCopiedVideoUrl(false), 2000);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold border border-white/10 cursor-pointer"
+                        >
+                          {copiedVideoUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedVideoUrl ? 'YouTube Query Copied' : 'Copy YouTube Search Link'}</span>
+                        </button>
+                      </div>
+                    );
+                  })()}
+
+                  {activeMediaTab === 'screenshots' && screenshots.length > 0 && (
                     <div className="w-full h-full relative flex items-center justify-center bg-black">
                       <img
                         src={screenshots[selectedScreenshot] || screenshots[0]}
@@ -720,7 +695,7 @@ export default function GameDetailModal({
                           <button
                             key={idx}
                             onClick={() => setSelectedScreenshot(idx)}
-                            className={`w-14 h-9 rounded-lg overflow-hidden border-2 transition-all ${
+                            className={`w-14 h-9 rounded-lg overflow-hidden border-2 transition-all cursor-pointer ${
                               selectedScreenshot === idx ? 'border-cyan-400 scale-105' : 'border-transparent opacity-60 hover:opacity-100'
                             }`}
                           >
@@ -730,23 +705,16 @@ export default function GameDetailModal({
                       </div>
                     </div>
                   )}
-
-                  {activeMediaTab === 'physical3d' && (
-                    <div className="w-full h-full">
-                      <PhysicalMedia3D game={game} />
-                    </div>
-                  )}
                 </div>
-
               </div>
 
               {/* DETAILS & CONTENT SECTION */}
               <div className="p-6 md:p-8">
-                
+
                 {/* Title & Badges */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-white/10">
                   <div>
-                    <div className="flex items-center gap-2.5 mb-2">
+                    <div className="flex items-center gap-2.5 mb-2 flex-wrap">
                       <span className="px-2.5 py-0.5 rounded-md bg-cyan-900/50 text-cyan-300 border border-cyan-500/40 text-xs font-bold uppercase tracking-wider">
                         {game.platform}
                       </span>
@@ -756,10 +724,12 @@ export default function GameDetailModal({
                           {game.release_year}
                         </span>
                       ) : null}
-                      <span className="text-xs text-slate-400 font-medium flex items-center gap-1">
-                        <Building className="w-3.5 h-3.5 text-slate-500" />
-                        {game.developer || game.publisher}
-                      </span>
+                      {(game.developer || game.publisher) && (
+                        <span className="text-xs text-slate-400 font-medium flex items-center gap-1">
+                          <Building className="w-3.5 h-3.5 text-slate-500" />
+                          {game.developer || game.publisher}
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-3">
@@ -773,15 +743,25 @@ export default function GameDetailModal({
                             onToggleFavorite(game);
                           }}
                           className={`p-2 rounded-xl border transition-all hover:scale-110 shadow cursor-pointer ${
-                            game.is_favorite 
-                              ? 'bg-rose-500 text-white border-rose-400' 
+                            game.is_favorite
+                              ? 'bg-rose-500 text-white border-rose-400'
                               : 'bg-slate-800 text-slate-400 border-white/10 hover:text-rose-400'
                           }`}
-                          title={game.is_favorite ? "Remove from Favorites" : "Add to Favorites"}
+                          title={game.is_favorite ? 'Remove from Favorites' : 'Add to Favorites'}
                         >
                           <Heart className={`w-4 h-4 ${game.is_favorite ? 'fill-white' : ''}`} />
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={handleRefreshTheGamesDb}
+                        disabled={refreshingMeta}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-sky-950/60 hover:bg-sky-900/60 border border-sky-500/30 text-sky-300 text-[11px] font-bold transition-all cursor-pointer disabled:opacity-50"
+                        title="Fetch latest cover art & synopsis from TheGamesDB"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${refreshingMeta ? 'animate-spin' : ''}`} />
+                        <span className="hidden sm:inline">{refreshingMeta ? 'Refreshing...' : 'Refresh Art'}</span>
+                      </button>
                     </div>
                   </div>
 
@@ -810,14 +790,14 @@ export default function GameDetailModal({
                           );
                         })}
                         <span className="font-bold text-base text-white ml-1.5">
-                          {currentUserRating !== null 
-                            ? currentUserRating.toFixed(1) 
+                          {currentUserRating !== null
+                            ? currentUserRating.toFixed(1)
                             : (game.rating > 0 ? Number(game.rating).toFixed(1) : '—')}
                         </span>
                       </div>
                       <span className="text-[11px] text-slate-400">
-                        {currentUserRating !== null 
-                          ? 'Your Personal Rating (Saved)' 
+                        {currentUserRating !== null
+                          ? 'Your Personal Rating (Saved)'
                           : (game.rating_count > 0 ? `${game.rating_count.toLocaleString()} user reviews` : 'Unrated')}
                       </span>
                     </div>
@@ -827,7 +807,7 @@ export default function GameDetailModal({
                 {/* Description */}
                 <div className="py-6 border-b border-white/10">
                   <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2.5">
-                    Game Overview & Lore
+                    Game Overview & Metadata
                   </h4>
                   <p className="text-slate-200 text-sm md:text-base leading-relaxed whitespace-pre-line font-normal">
                     {enrichedDescription || game.description}
@@ -855,67 +835,171 @@ export default function GameDetailModal({
                   </div>
                 )}
 
+                {/* Completed Local File Banner */}
                 {isCompleted && (
-                  <div className="my-6 p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 flex items-center justify-between">
-                    <div className="flex items-center gap-3 text-emerald-300 text-sm font-semibold">
-                      <ShieldCheck className="w-5 h-5 text-emerald-400" />
-                      <div>
-                        <div className="font-bold">ROM Ready on Local Drive</div>
-                        <div className="text-xs text-emerald-400/80 font-mono">
-                          {game.path || `/Volumes/ROMS/${game.platform}/`}
+                  <div className="my-6 p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 text-emerald-300 text-sm font-semibold min-w-0">
+                      <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="font-bold">ROM Saved on Local Drive</div>
+                        <div className="text-xs text-emerald-400/80 font-mono truncate">
+                          {resolvedLocalPath || `/Volumes/ROMS/${game.platform}/`}
                         </div>
                       </div>
                     </div>
-                    <button
-                      onClick={() => setShowPlayer(true)}
-                      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 hover:from-emerald-300 hover:to-cyan-400 text-black font-bold text-xs shadow-lg hover:scale-105 active:scale-95 transition-all cursor-pointer"
-                    >
-                      <Play className="w-4 h-4 fill-black" />
-                      <span>Play in OmniVault</span>
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {resolvedLocalPath && (
+                        <button
+                          onClick={handleCopyPath}
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/10 font-semibold text-xs transition-all cursor-pointer"
+                          title="Copy local file path"
+                        >
+                          {copiedPath ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedPath ? 'Copied' : 'Copy Path'}</span>
+                        </button>
+                      )}
+                      <button
+                        onClick={handleRevealInFinder}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 hover:from-emerald-300 hover:to-cyan-400 text-black font-bold text-xs shadow-lg hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                      >
+                        <FolderOpen className="w-4 h-4" />
+                        <span>Reveal in Finder</span>
+                      </button>
+                    </div>
                   </div>
                 )}
 
                 {/* DOWNLOAD SOURCES ACTION BAR */}
-                <div className="pt-6">
-                  <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3.5">
-                    Download Sources & BitTorrent Magnet
-                  </h4>
+                <div className="pt-6 space-y-3.5">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-slate-400">
+                      Download Sources & BitTorrent Magnet
+                    </h4>
+                  </div>
+
+                  {/* SAVE STRAIGHT TO: LOCAL DRIVE / ICLOUD / GOOGLE DRIVE / ONEDRIVE */}
+                  <div className="p-3 rounded-2xl bg-slate-900/70 border border-white/10 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+                      <Cloud className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Save Straight To:</span>
+                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {[
+                        { id: 'local', label: 'Local Drive', available: true, mode: 'local' },
+                        ...(cloudTargetsInfo.targets || []).map((t) => ({
+                          id: t.id,
+                          label: t.name,
+                          available: Boolean(t.available),
+                          mode: t.mode,
+                        })),
+                      ].map((opt) => {
+                        const active = selectedCloudTarget === opt.id;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => {
+                              playClick();
+                              if (!opt.available && onOpenSettings) {
+                                onClose();
+                                onOpenSettings();
+                              } else {
+                                setSelectedCloudTarget(opt.id);
+                              }
+                            }}
+                            className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border flex items-center gap-1.5 transition-all cursor-pointer ${
+                              active
+                                ? 'bg-sky-500/20 text-sky-200 border-sky-400/60 shadow-sm'
+                                : opt.available
+                                ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 border-white/10'
+                                : 'bg-slate-950/60 text-slate-500 border-white/5 hover:text-slate-300'
+                            }`}
+                          >
+                            {opt.id === 'local' ? (
+                              <HardDrive className="w-3 h-3 text-cyan-400" />
+                            ) : (
+                              <Cloud className={`w-3 h-3 ${opt.available ? 'text-sky-400' : 'text-slate-500'}`} />
+                            )}
+                            <span>{opt.label}</span>
+                            {opt.id !== 'local' && !opt.available && (
+                              <span className="text-[9px] font-mono text-amber-400">+ Setup</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                    
-                    {/* Direct ROM Download / Torrentio Source Button */}
-                    <button
-                      onClick={() => {
-                        if (romMirrors.length > 0) {
-                          handleDownloadMirror(romMirrors[0]);
-                        } else {
-                          onStartDownload(game, 'direct');
-                        }
-                      }}
-                      className="flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold transition-all shadow-glow-cyan hover:scale-[1.02] active:scale-98 cursor-pointer"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center">
-                          <Download className="w-5 h-5 text-black" />
-                        </div>
-                        <div className="text-left">
-                          <div className="text-sm font-black tracking-wide">
-                            {romMirrors.length > 0 ? `Download ROM (${romMirrors[0].source_name})` : 'Download ROM File'}
+                    {(() => {
+                      const readyMirror = romMirrors.find((m) => m.is_downloadable !== false && !m.requires_realdebrid);
+                      const fallbackLocked = !readyMirror ? romMirrors[0] : null;
+                      if (fallbackLocked && fallbackLocked.requires_realdebrid && !realdebridActive) {
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              playClick();
+                              if (onOpenSettings) {
+                                onClose();
+                                onOpenSettings();
+                              }
+                            }}
+                            className="flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-bold transition-all shadow-lg hover:scale-[1.02] active:scale-98 cursor-pointer"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center">
+                                <Lock className="w-5 h-5 text-black" />
+                              </div>
+                              <div className="text-left">
+                                <div className="text-sm font-black tracking-wide">
+                                  Unlock Hoster ({fallbackLocked.source_name})
+                                </div>
+                                <div className="text-[11px] text-black/80 font-semibold">
+                                  Add a Real-Debrid token in Settings to download
+                                </div>
+                              </div>
+                            </div>
+                            <span className="text-xs bg-black/20 px-2 py-1 rounded-md uppercase font-mono">
+                              RD
+                            </span>
+                          </button>
+                        );
+                      }
+                      const primaryMirror = readyMirror || romMirrors[0];
+                      return (
+                        <button
+                          onClick={() => {
+                            if (primaryMirror) {
+                              handleDownloadMirror(primaryMirror);
+                            } else {
+                              onStartDownload(game, 'direct', null, null, null, selectedCloudTarget);
+                            }
+                          }}
+                          className="flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold transition-all shadow-glow-cyan hover:scale-[1.02] active:scale-98 cursor-pointer"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center">
+                              <Download className="w-5 h-5 text-black" />
+                            </div>
+                            <div className="text-left">
+                              <div className="text-sm font-black tracking-wide">
+                                {primaryMirror ? `Download ROM (${primaryMirror.source_name})` : 'Download ROM File'}
+                              </div>
+                              <div className="text-[11px] text-black/80 font-semibold">
+                                {primaryMirror
+                                  ? `${primaryMirror.quality} • ${primaryMirror.file_size_mb > 0 ? formatModalSize(primaryMirror.file_size_mb) : 'Ready In-App'}`
+                                  : (loadingMirrors ? 'Resolving exact-game mirrors...' : `Direct Preservation CDN • ${formatModalSize(game.file_size_mb)}`)}
+                              </div>
+                            </div>
                           </div>
-                          <div className="text-[11px] text-black/80 font-semibold">
-                            {romMirrors.length > 0 
-                              ? `${romMirrors[0].quality} • ${romMirrors[0].file_size_mb > 0 ? formatModalSize(romMirrors[0].file_size_mb) : 'Full Speed CDN'}`
-                              : (loadingMirrors ? 'Resolving download mirrors...' : `Direct Preservation CDN • ${formatModalSize(game.file_size_mb)}`)}
-                          </div>
-                        </div>
-                      </div>
-                      <span className="text-xs bg-black/20 px-2 py-1 rounded-md uppercase font-mono">
-                        {romMirrors[0]?.format || game.rom_format}
-                      </span>
-                    </button>
+                          <span className="text-xs bg-black/20 px-2 py-1 rounded-md uppercase font-mono">
+                            {primaryMirror?.format || game.rom_format || 'ROM'}
+                          </span>
+                        </button>
+                      );
+                    })()}
 
-                    {/* Authentic P2P Magnet Button (If Available) */}
                     {game.magnet_uri && (
                       <a
                         href={game.magnet_uri}
@@ -943,20 +1027,37 @@ export default function GameDetailModal({
                         </div>
                       </a>
                     )}
-
                   </div>
 
                   {/* VERIFIED ROM DOWNLOAD SOURCES & MIRRORS CARD */}
                   <div className="mt-4 p-4 rounded-2xl bg-gradient-to-br from-slate-900 via-cyan-950/20 to-slate-900 border border-cyan-500/30 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <Zap className="w-4 h-4 text-cyan-400 animate-pulse" />
                         <h4 className="text-xs font-black uppercase tracking-wider text-cyan-300">
-                          Verified ROM Mirrors & Torrents
+                          Verified ROM Mirrors &amp; Torrents
                         </h4>
                         <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800">
                           {romMirrors.length} Download Sources
                         </span>
+                        {realdebridActive ? (
+                          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                            <Unlock className="w-3 h-3" />
+                            <span>{rdUnlockedCount > 0 ? `Real-Debrid Unlocked (${rdUnlockedCount})` : 'Real-Debrid Active'}</span>
+                          </span>
+                        ) : (romMirrors.some(m => m.requires_realdebrid) && onOpenSettings && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onClose();
+                              onOpenSettings();
+                            }}
+                            className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-amber-950/80 hover:bg-amber-900/80 text-amber-300 border border-amber-500/40 flex items-center gap-1 cursor-pointer transition-colors"
+                          >
+                            <Lock className="w-3 h-3" />
+                            <span>Unlock Hosters with Real-Debrid</span>
+                          </button>
+                        ))}
                       </div>
                       {loadingMirrors && (
                         <div className="flex items-center gap-1.5 text-[11px] text-cyan-400 font-mono">
@@ -967,7 +1068,7 @@ export default function GameDetailModal({
                     </div>
 
                     <p className="text-[11px] text-slate-400">
-                      Multi-source ROM discovery: Aggregates verified game dumps and torrents from ConsoleRoms CDN, RomsFast high-speed servers, RomsLab Switch NSPs, and configured P2P indexers.
+                      Multi-source ROM discovery: Ranked by Real-Debrid priority (when enabled), measured CDN speed, and live torrent seeds/peers.
                     </p>
 
                     <div className="space-y-2 max-h-56 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-cyan-900">
@@ -997,81 +1098,225 @@ export default function GameDetailModal({
                                   {formatModalSize(mirror.file_size_mb)}
                                 </span>
                               )}
+                              {mirror.speed_mbps > 0 && (
+                                <span
+                                  className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-700/60"
+                                  title={mirror.latency_ms < 9999 ? `Measured HTTP speed (${mirror.latency_ms}ms latency)` : 'Measured HTTP speed'}
+                                >
+                                  ⚡ {Number(mirror.speed_mbps).toFixed(1)} MB/s
+                                </span>
+                              )}
+                              {mirror.is_realdebrid && !(mirror.speed_mbps > 0) && (
+                                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-cyan-950/70 text-cyan-300 border border-cyan-700/60">
+                                  RD High-Speed
+                                </span>
+                              )}
+                              {(mirror.seeders > 0 || mirror.peers > 0) && (
+                                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-700/60">
+                                  ▲ {mirror.seeders || 0}S • {mirror.peers || mirror.seeders || 0}P
+                                </span>
+                              )}
+                              {mirror.requires_realdebrid && (
+                                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-700/60 flex items-center gap-1">
+                                  <Lock className="w-2.5 h-2.5" />
+                                  <span>RD Required</span>
+                                </span>
+                              )}
                             </div>
                             <div className="text-[10px] text-slate-400 mt-0.5 truncate">
                               {mirror.quality} • {mirror.source_name}
                             </div>
                           </div>
 
-                          <button
-                            onClick={() => handleDownloadMirror(mirror)}
-                            className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-black text-xs flex items-center gap-1.5 transition-all shadow-glow-cyan shrink-0 cursor-pointer"
-                          >
-                            <Download className="w-3.5 h-3.5 text-black" />
-                            <span>Download ROM</span>
-                          </button>
+                          {mirror.requires_realdebrid && !realdebridActive ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (onOpenSettings) {
+                                  onClose();
+                                  onOpenSettings();
+                                }
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-xs flex items-center gap-1.5 transition-all shrink-0 cursor-pointer"
+                            >
+                              <Lock className="w-3.5 h-3.5" />
+                              <span>Unlock RD</span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleDownloadMirror(mirror)}
+                              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-black text-xs flex items-center gap-1.5 transition-all shadow-glow-cyan shrink-0 cursor-pointer"
+                            >
+                              <Download className="w-3.5 h-3.5 text-black" />
+                              <span>Download ROM</span>
+                            </button>
+                          )}
                         </div>
                       ))}
 
                       {romMirrors.length === 0 && !loadingMirrors && (
                         <div className="p-3 text-center rounded-xl bg-slate-950/40 border border-white/5 text-xs text-slate-400">
-                          No direct ROM mirrors responded for this exact game title. Use the web search helpers below or attach a custom source.
+                          No direct downloadable ROM mirrors matched this exact game title yet. Click any source below to scrape directly in-app or attach a custom URL in the Web Sources tab.
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* WEB SEARCH & COMMUNITY SOURCE HELPERS */}
-                  <div className="mt-4 p-4 rounded-2xl bg-slate-900/60 border border-white/5 space-y-2.5">
-                    <div className="flex items-center justify-between">
+                  {/* IN-APP COMMUNITY SOURCE SCRAPERS (ZERO EXTERNAL REDIRECTS) */}
+                  <div className="mt-4 p-4 rounded-2xl bg-slate-900/60 border border-white/5 space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
                         <Globe className="w-4 h-4 text-cyan-400" />
                         <h4 className="text-xs font-black uppercase tracking-wider text-slate-200">
-                          Community Source & Web Lookups
+                          In-App Community Source Scrapers
                         </h4>
                       </div>
-                      <span className="text-[10px] text-slate-500 font-mono">
-                        Bring Your Own Source
+                      <span className="text-[10px] text-emerald-400 font-mono">
+                        Direct In-App Scrape &amp; Download
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-400">
-                      Need a specific revision or community dump? Jump directly to verified preservation queries on the web:
+                      Click any configured source to scrape exact matches for <span className="text-slate-200 font-semibold">{game.title}</span> and queue downloads directly inside OmniVault:
                     </p>
                     <div className="flex items-center gap-2 flex-wrap pt-1">
-                      {(game.web_search_helpers || [
-                        { name: "Internet Archive", url: `https://archive.org/search.php?query=${encodeURIComponent(game.title + ' ' + (game.platform_name || game.platform))}` },
-                        { name: "DuckDuckGo", url: `https://duckduckgo.com/?q=${encodeURIComponent(game.title + ' ' + (game.platform_name || game.platform) + ' preservation archive')}` },
-                        { name: "Vimm's Lair", url: `https://vimm.net/vault/?p=list&q=${encodeURIComponent(game.title)}` },
-                        { name: "RomsFun", url: `https://romsfun.com/?s=${encodeURIComponent(game.title)}` }
-                      ]).map((helper, idx) => helper && helper.url ? (
-                        <a
-                          key={idx}
-                          href={helper.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-cyan-300 text-xs font-semibold border border-white/10 transition-colors"
-                        >
-                          <span>{helper.name}</span>
-                          <ArrowUpRight className="w-3 h-3 text-slate-400" />
-                        </a>
-                      ) : null)}
+                      {activeHelpers.map((helper, idx) => {
+                        if (!helper || !helper.name) return null;
+                        const key = helper.source_id || helper.name || idx;
+                        const isScraping = Boolean(helper.source_id && scrapingSourceId === helper.source_id);
+                        const isSelected = Boolean(selectedCommunitySource && (selectedCommunitySource.source_id || selectedCommunitySource.name) === (helper.source_id || helper.name));
+                        const cachedCount = helper.source_id ? romMirrors.filter((m) => m.source_id === helper.source_id).length : 0;
+                        const isCopied = copiedHelperKey === key;
+
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => handleScrapeCommunitySource(helper)}
+                            disabled={isScraping}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors cursor-pointer disabled:opacity-60 ${
+                              isSelected
+                                ? 'bg-cyan-500/20 text-cyan-200 border-cyan-400/60'
+                                : 'bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-cyan-300 border-white/10'
+                            }`}
+                          >
+                            {isScraping ? (
+                              <RefreshCw className="w-3 h-3 animate-spin text-cyan-400" />
+                            ) : helper.can_scrape === false ? (
+                              isCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-slate-400" />
+                            ) : (
+                              <Search className="w-3 h-3 text-cyan-400" />
+                            )}
+                            <span>{isCopied ? `${helper.name} (Copied URL)` : helper.name}</span>
+                            {cachedCount > 0 && (
+                              <span className="px-1.5 py-0.2 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/60 text-[10px] font-mono">
+                                {cachedCount}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
+
+                    {/* Inline Results from Clicked Community Source */}
+                    {selectedCommunitySource && (
+                      <div className="mt-2 p-3.5 rounded-xl bg-slate-950/70 border border-cyan-500/30 space-y-2.5">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                            <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>
+                              {scrapingSourceId === selectedCommunitySource.source_id
+                                ? `Scraping ${selectedCommunitySource.name} for "${game.title}"...`
+                                : `${selectedCommunitySource.name}: ${communitySourceMirrors.length} exact match${communitySourceMirrors.length === 1 ? '' : 'es'}`}
+                            </span>
+                          </div>
+                          {(() => {
+                            const bestDirect = communitySourceMirrors.find((m) => m.is_downloadable !== false && !m.requires_realdebrid);
+                            if (!bestDirect) return null;
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadMirror(bestDirect)}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-black flex items-center gap-1 cursor-pointer"
+                              >
+                                <Download className="w-3 h-3" />
+                                <span>Download Best Match</span>
+                              </button>
+                            );
+                          })()}
+                        </div>
+
+                        {communitySourceError && (
+                          <div className="text-xs text-rose-300 flex items-center gap-1.5">
+                            <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                            <span>{communitySourceError}</span>
+                          </div>
+                        )}
+
+                        {!scrapingSourceId && !communitySourceError && communitySourceMirrors.length === 0 && (
+                          <div className="text-xs text-slate-400">
+                            No exact downloadable ROM for <span className="text-slate-200 font-semibold">{game.title}</span> ({game.platform}) was returned by {selectedCommunitySource.name}.
+                          </div>
+                        )}
+
+                        {communitySourceMirrors.length > 0 && (
+                          <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                            {communitySourceMirrors.map((cm, cIdx) => (
+                              <div
+                                key={cm.id || cm.direct_url || cIdx}
+                                className="p-2.5 rounded-lg bg-slate-900/90 border border-white/10 flex items-center justify-between gap-2"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-xs font-bold text-white truncate">{cm.title}</div>
+                                  <div className="text-[10px] text-slate-400 truncate">
+                                    {cm.format} • {cm.quality}{cm.file_size_mb > 0 ? ` • ${formatModalSize(cm.file_size_mb)}` : ''}
+                                  </div>
+                                </div>
+                                {cm.requires_realdebrid && !realdebridActive ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (onOpenSettings) {
+                                        onClose();
+                                        onOpenSettings();
+                                      }
+                                    }}
+                                    className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+                                  >
+                                    <Lock className="w-3 h-3" />
+                                    <span>Unlock RD</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadMirror(cm)}
+                                    className="px-2.5 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black text-[11px] font-black flex items-center gap-1 shrink-0 cursor-pointer"
+                                  >
+                                    <Download className="w-3 h-3" />
+                                    <span>Download ROM</span>
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* COMMUNITY PLAYER REVIEWS & WRITE A REVIEW SECTION */}
-                <div className="pt-8 border-t border-white/10">
+                {/* COMMUNITY REVIEWS & NOTES SECTION */}
+                <div className="pt-8 border-t border-white/10 mt-6">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
                     <div>
                       <h4 className="text-sm font-bold text-white flex items-center gap-2">
                         <MessageSquare className="w-4 h-4 text-cyan-400" />
-                        <span>Player Reviews & Community Lore</span>
+                        <span>Community Notes & Reviews</span>
                         <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800">
                           {reviewsData?.total_reviews || reviews.length} Reviews
                         </span>
                       </h4>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        Authentic player impressions, 60 FPS emulation tuning, soundtrack analysis, and gameplay lore.
+                        Catalog notes, dump revision feedback, and community ratings.
                       </p>
                     </div>
 
@@ -1084,7 +1329,6 @@ export default function GameDetailModal({
                     </button>
                   </div>
 
-                  {/* Interactive Write Review Form */}
                   {showWriteReview && (
                     <form onSubmit={handleSubmitReview} className="mb-6 p-4 rounded-2xl bg-slate-900 border border-cyan-500/40 space-y-3">
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1124,7 +1368,7 @@ export default function GameDetailModal({
                       <textarea
                         value={newReviewText}
                         onChange={(e) => setNewReviewText(e.target.value)}
-                        placeholder="Share your thoughts on gameplay mechanics, OST, difficulty, and emulator performance..."
+                        placeholder="Share notes about this title, recommended revisions, or soundtrack/gameplay highlights..."
                         rows={3}
                         className="w-full p-3 text-xs rounded-xl bg-slate-950 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 leading-relaxed resize-none"
                         required
@@ -1150,10 +1394,9 @@ export default function GameDetailModal({
                     </form>
                   )}
 
-                  {/* Reviews List */}
                   <div className="space-y-3">
                     {loadingReviews ? (
-                      <div className="py-8 text-center text-xs text-slate-400">Loading community reviews...</div>
+                      <div className="py-8 text-center text-xs text-slate-400">Loading reviews...</div>
                     ) : reviews.length > 0 ? (
                       reviews.map((r, idx) => (
                         <div
@@ -1174,18 +1417,13 @@ export default function GameDetailModal({
                               <div>
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs font-bold text-white">{r.author}</span>
-                                  {r.verified_player && (
-                                    <span className="text-[9px] uppercase font-bold px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">
-                                      Verified Player
-                                    </span>
-                                  )}
                                   {r.is_user && (
                                     <span className="text-[9px] uppercase font-bold px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
                                       You
                                     </span>
                                   )}
                                 </div>
-                                <div className="text-[10px] text-slate-500">{r.created_at || 'Preservation Vault'}</div>
+                                <div className="text-[10px] text-slate-500">{r.created_at || 'Catalog'}</div>
                               </div>
                             </div>
 
@@ -1202,7 +1440,7 @@ export default function GameDetailModal({
                       ))
                     ) : (
                       <div className="py-6 text-center text-xs text-slate-400">
-                        No written reviews yet. Be the first to share your thoughts on this classic!
+                        No reviews yet. Be the first to add a note for this title!
                       </div>
                     )}
                   </div>
@@ -1212,198 +1450,16 @@ export default function GameDetailModal({
             </div>
           )}
 
-          {/* TAB 2: CHEATS */}
-          {modalTab === 'cheats' && (
-            <div className="p-6 md:p-8 space-y-6">
-              
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/10">
-                <div>
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Wand2 className="w-5 h-5 text-amber-400" />
-                    <span>Cheat Codes for {game.title}</span>
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Verified Game Genie, Action Replay, and GameShark codes from the Libretro preservation database.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => onOpenCheatLab?.(game)}
-                    className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 font-bold text-xs transition-all cursor-pointer shadow-md"
-                    title="Open Cheat Engineering Lab for Save Diffing, RAM Scanning & ROM Analysis"
-                  >
-                    <Wrench className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Cheat Lab</span>
-                  </button>
-
-                  <button
-                    onClick={handleExportCheats}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs transition-all cursor-pointer shadow-md"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Export .cht to ROM Folder</span>
-                  </button>
-                </div>
-              </div>
-
-              {exportMessage && (
-                <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center gap-2">
-                  <Check className="w-4 h-4 text-emerald-400" />
-                  <span>{exportMessage}</span>
-                </div>
-              )}
-
-              {loadingExtras ? (
-                <div className="py-16 text-center text-slate-400 text-xs">
-                  Loading verified cheat codes...
-                </div>
-              ) : cheats.length === 0 ? (
-                <div className="py-16 text-center text-slate-400 text-xs">
-                  No cheat codes found for this title.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  {cheats.map((c) => (
-                    <div
-                      key={c.id}
-                      className="p-3.5 rounded-2xl bg-slate-900/90 border border-white/10 flex items-center justify-between gap-3 hover:border-amber-400/40 transition-colors"
-                    >
-                      <div className="min-w-0">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400/90 block mb-0.5">
-                          {c.type}
-                        </span>
-                        <div className="text-xs font-bold text-white truncate" title={c.description}>
-                          {c.description}
-                        </div>
-                        <div className="font-mono text-[11px] text-cyan-300 bg-black/40 px-2 py-0.5 rounded mt-1.5 inline-block">
-                          {c.code}
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => handleCopyCheat(c)}
-                        className="p-2 rounded-xl bg-slate-800 hover:bg-amber-400 hover:text-black text-slate-300 transition-colors flex-shrink-0 cursor-pointer"
-                        title="Copy cheat code"
-                      >
-                        {copiedCheatId === c.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-            </div>
-          )}
-
-          {/* TAB 3: PATCHES */}
-          {modalTab === 'patches' && (
-            <div className="p-6 md:p-8 space-y-6">
-              <div>
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <FileCode className="w-5 h-5 text-violet-400" />
-                  <span>Patches & Translations for {game.title}</span>
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Community English translations, MSU-1 audio overhauls, FastROM performance accelerators, and bugfix restorations.
-                </p>
-              </div>
-
-              <div className="space-y-3.5">
-                {patches.map((p) => (
-                  <div
-                    key={p.id}
-                    className="p-4 rounded-2xl bg-slate-900/90 border border-white/10 hover:border-violet-500/40 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-950 text-violet-300 border border-violet-800">
-                          {p.category}
-                        </span>
-                        <span className="text-[11px] text-slate-400 font-mono">
-                          Format: {p.format}
-                        </span>
-                        <span className="text-[11px] text-slate-500">
-                          by {p.author}
-                        </span>
-                      </div>
-                      <h4 className="text-sm font-bold text-white mb-1">
-                        {p.name}
-                      </h4>
-                      <p className="text-xs text-slate-300 leading-relaxed">
-                        {p.description}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-600/20 border border-violet-500/30 text-violet-300 text-xs font-semibold whitespace-nowrap self-start sm:self-center">
-                      <Sparkles className="w-3.5 h-3.5 text-violet-400" />
-                      <span>Built-in Patch</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 4: MODS & ROM HACKS */}
-          {modalTab === 'mods' && (
-            <div className="p-6 md:p-8 space-y-6">
-              <div>
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Wrench className="w-5 h-5 text-emerald-400" />
-                  <span>ROM Hacks & Community Mods for {game.title}</span>
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Overhaul mods, quality-of-life rebalances, randomizer builds, and fan expansions with brand-new content.
-                </p>
-              </div>
-
-              <div className="space-y-3.5">
-                {mods.map((m) => (
-                  <div
-                    key={m.id}
-                    className="p-4 rounded-2xl bg-slate-900/90 border border-white/10 hover:border-emerald-500/40 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
-                          {m.category}
-                        </span>
-                        <span className="text-[11px] text-emerald-400 font-mono">
-                          {m.version}
-                        </span>
-                        <span className="text-[11px] text-slate-500">
-                          Difficulty: {m.difficulty}
-                        </span>
-                      </div>
-                      <h4 className="text-sm font-bold text-white mb-1">
-                        {m.name}
-                      </h4>
-                      <p className="text-xs text-slate-300 leading-relaxed">
-                        {m.description}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 text-xs font-semibold whitespace-nowrap self-start sm:self-center">
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Built-in Mod</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 5: WEB SOURCES */}
+          {/* TAB 2: WEB SOURCES & CUSTOM LINK */}
           {modalTab === 'sources' && (
             <div className="p-6 md:p-8 space-y-6">
               <div>
                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
                   <Globe className="w-5 h-5 text-sky-400" />
-                  <span>Alternative Web & Community Sources</span>
+                  <span>Web Sources & Custom Download Link</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Direct 1-click search shortcuts to explore this title across the top ROM preservation directories and communities.
+                  Scan live direct mirrors, open external archive searches, or attach a custom download URL / magnet link for this title.
                 </p>
               </div>
 
@@ -1413,10 +1469,10 @@ export default function GameDetailModal({
                   <div>
                     <h4 className="text-sm font-bold text-white flex items-center gap-2">
                       <Zap className="w-4 h-4 text-cyan-400" />
-                      <span>Live Direct Mirror Failover</span>
+                      <span>Live Direct Mirror Scan</span>
                     </h4>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Instantly test BlueRoms, r-roms, and mirror servers to find an active, verified direct ROM mirror.
+                      Test configured mirror directories to locate an active HTTP 200/206 direct ROM download stream.
                     </p>
                   </div>
                   <button
@@ -1437,7 +1493,7 @@ export default function GameDetailModal({
                         <span>Verified Live Mirror: {liveMirror.source_name}</span>
                       </div>
                       <p className="text-[11px] text-slate-300 mt-0.5 truncate max-w-md">
-                        {liveMirror.filename || game.title} • HTTP 200 Mirror Verified
+                        {liveMirror.filename || game.title}
                       </p>
                     </div>
                     <button
@@ -1458,25 +1514,118 @@ export default function GameDetailModal({
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                {altSources.map((s, idx) => (
+              {/* Attach Custom Direct URL or Magnet URI */}
+              <form
+                onSubmit={(e) => handleSaveCustomSource(e, false)}
+                className="p-4 rounded-2xl bg-slate-900/70 border border-white/10 space-y-3"
+              >
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
+                    <LinkIcon className="w-4 h-4 text-cyan-400" />
+                    <span>Attach Custom Direct URL or Magnet URI</span>
+                  </h4>
+                  <span className="text-[10px] text-slate-500 font-mono">Saved to Catalog Entry</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 block mb-1">
+                      Direct Archive / ISO / ROM URL
+                    </label>
+                    <input
+                      type="text"
+                      value={customDirectUrl}
+                      onChange={(e) => setCustomDirectUrl(e.target.value)}
+                      placeholder="https://example.com/roms/game.zip"
+                      className="w-full bg-slate-950 border border-white/15 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-400 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 block mb-1">
+                      BitTorrent Magnet URI
+                    </label>
+                    <input
+                      type="text"
+                      value={customMagnetUri}
+                      onChange={(e) => setCustomMagnetUri(e.target.value)}
+                      placeholder="magnet:?xt=urn:btih:..."
+                      className="w-full bg-slate-950 border border-white/15 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-violet-400 font-mono"
+                    />
+                  </div>
+                </div>
+
+                {sourceSavedMsg && (
+                  <div className="p-2.5 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>{sourceSavedMsg}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
                   <button
-                    key={idx}
-                    onClick={handleScanMirrors}
-                    className="p-4 rounded-2xl bg-slate-900/80 hover:bg-slate-800 border border-white/10 hover:border-cyan-400/40 transition-all flex items-center justify-between group text-left cursor-pointer"
+                    type="submit"
+                    disabled={savingCustomSource}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-white/10 transition-colors cursor-pointer disabled:opacity-50"
                   >
-                    <div>
-                      <div className="text-xs font-bold text-white group-hover:text-cyan-300 flex items-center gap-1.5">
-                        <span>{s.name}</span>
-                        <Zap className="w-3 h-3 text-cyan-400" />
-                      </div>
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        {s.desc}
-                      </p>
-                    </div>
-                    <RefreshCw className="w-4 h-4 text-slate-500 group-hover:text-cyan-400 flex-shrink-0" />
+                    {savingCustomSource ? 'Saving...' : 'Save Link'}
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    disabled={savingCustomSource || (!customDirectUrl.trim() && !customMagnetUri.trim())}
+                    onClick={() => handleSaveCustomSource(null, true)}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black text-xs font-black flex items-center gap-1.5 shadow-glow-cyan transition-all cursor-pointer disabled:opacity-40"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Save & Download Now</span>
+                  </button>
+                </div>
+              </form>
+
+              {/* In-App Community Scrapers & Directories */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  Configured Community Sources (In-App Direct Scrape)
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  {activeHelpers.map((s, idx) => {
+                    const key = s.source_id || s.name || idx;
+                    const isScraping = Boolean(s.source_id && scrapingSourceId === s.source_id);
+                    const isCopied = copiedHelperKey === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => {
+                          if (s.can_scrape === false) {
+                            handleCopyHelperUrl(key, s.url);
+                          } else {
+                            handleScrapeCommunitySource(s).then(() => setModalTab('overview'));
+                          }
+                        }}
+                        disabled={isScraping}
+                        className="p-4 rounded-2xl bg-slate-900/80 hover:bg-slate-800 border border-white/10 hover:border-cyan-400/40 transition-all flex items-center justify-between group text-left cursor-pointer disabled:opacity-60"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-white group-hover:text-cyan-300 flex items-center gap-1.5">
+                            <span>{s.name}</span>
+                            {isScraping ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+                            ) : s.can_scrape === false ? (
+                              isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />
+                            ) : (
+                              <Search className="w-3.5 h-3.5 text-cyan-400" />
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-400 mt-1 truncate">
+                            {s.can_scrape === false
+                              ? (isCopied ? 'URL copied to clipboard' : 'Click to copy directory URL')
+                              : (s.description || 'Scrape & download directly in OmniVault')}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Custom Search Templates (User Configured) */}
@@ -1484,27 +1633,32 @@ export default function GameDetailModal({
                 <div className="space-y-3 pt-3 border-t border-white/10">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                    <span>User-Configured Search Engines</span>
+                    <span>User-Configured Search Templates (Copy Query URL)</span>
                   </h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                    {customTemplates.map((tpl) => (
-                      <button
-                        key={tpl.id}
-                        onClick={handleScanMirrors}
-                        className="p-4 rounded-2xl bg-amber-950/20 hover:bg-amber-950/30 border border-amber-500/30 hover:border-amber-400/60 transition-all flex items-center justify-between group text-left cursor-pointer"
-                      >
-                        <div>
-                          <div className="text-xs font-bold text-amber-300 group-hover:text-amber-200 flex items-center gap-1.5">
-                            <span>{tpl.name}</span>
-                            <Sparkles className="w-3 h-3 text-amber-400/60" />
+                    {customTemplates.map((tpl) => {
+                      const tKey = `tpl-${tpl.id}`;
+                      const isCopied = copiedHelperKey === tKey;
+                      const resolvedUrl = resolveTemplateUrl(tpl.url_template);
+                      return (
+                        <button
+                          key={tpl.id}
+                          type="button"
+                          onClick={() => handleCopyHelperUrl(tKey, resolvedUrl)}
+                          className="p-4 rounded-2xl bg-amber-950/20 hover:bg-amber-950/30 border border-amber-500/30 hover:border-amber-400/60 transition-all flex items-center justify-between group text-left cursor-pointer"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold text-amber-300 group-hover:text-amber-200 flex items-center gap-1.5">
+                              <span>{tpl.name}</span>
+                              {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-amber-400" />}
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-1 truncate max-w-[240px]">
+                              {isCopied ? 'Query URL copied to clipboard' : (tpl.description || tpl.url_template)}
+                            </p>
                           </div>
-                          <p className="text-[11px] text-slate-400 mt-1 truncate max-w-[220px]">
-                            {tpl.description || 'Internal ROM search provider'}
-                          </p>
-                        </div>
-                        <RefreshCw className="w-4 h-4 text-amber-400 group-hover:text-amber-300 flex-shrink-0" />
-                      </button>
-                    ))}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -1517,7 +1671,7 @@ export default function GameDetailModal({
                     <span>Configure Search Engines & Torznab Feeds</span>
                   </h5>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Connect custom indexers (Prowlarr, Jackett) or add search templates for any website.
+                    Connect custom indexers (Prowlarr, Jackett) or add custom search templates.
                   </p>
                 </div>
                 {onOpenSettings && (
@@ -1527,7 +1681,7 @@ export default function GameDetailModal({
                       onClose();
                       onOpenSettings();
                     }}
-                    className="px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-all shadow shrink-0"
+                    className="px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-all shadow shrink-0 cursor-pointer"
                   >
                     Manage Providers
                   </button>
@@ -1536,259 +1690,8 @@ export default function GameDetailModal({
             </div>
           )}
 
-          {/* TAB 6: UNIVERSAL TROPHIES & RETROACHIEVEMENTS */}
-          {modalTab === 'trophies' && (
-            <div className="p-6 md:p-8 space-y-6 animate-in fade-in duration-200">
-              <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 p-5 rounded-2xl bg-gradient-to-r from-amber-950/40 via-yellow-950/30 to-slate-900 border border-amber-500/40 shadow-xl">
-                <div className="flex items-center gap-3.5">
-                  <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-400/50 flex items-center justify-center text-amber-400 shadow-md">
-                    <Trophy className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                      <span>{achievements?.system_type === 'retroachievements' ? 'RetroAchievements Online' : 'Universal Trophy Engine'}</span>
-                      <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-700/60 font-black">
-                        {achievements?.system_type === 'retroachievements' ? 'Cloud Verified' : 'Save-Data Auto-Tracker'}
-                      </span>
-                    </h4>
-                    <p className="text-xs text-slate-300 mt-0.5">
-                      {achievements?.message || 'Trophies synchronize automatically with your emulator save files (.srm, .sav, .state) and Time-Machine snapshots.'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-4 border-t lg:border-t-0 lg:border-l border-white/10 pt-3 lg:pt-0 lg:pl-4">
-                  {achievements && (
-                    <div className="flex items-center gap-4">
-                      <div>
-                        <div className="text-[10px] uppercase font-bold text-slate-400">Unlocked</div>
-                        <div className="text-base font-black text-amber-300 font-mono">
-                          {achievements.unlocked_count}/{achievements.total_achievements} ({achievements.completion_percentage}%)
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] uppercase font-bold text-slate-400">Total Points</div>
-                        <div className="text-base font-black text-white font-mono">
-                          {achievements.earned_points}/{achievements.total_points} PTS
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={handleScanAchievements}
-                    disabled={isScanningSaves}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-black font-black text-xs shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer shrink-0"
-                    title="Scan RetroArch, Dolphin, PCSX2, RPCS3, and local directories for save progress"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isScanningSaves ? 'animate-spin' : ''}`} />
-                    <span>{isScanningSaves ? 'Scanning Save Data...' : 'Scan Save Data for Progress'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Completion Progress Bar */}
-              {achievements && achievements.total_achievements > 0 && (
-                <div className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between text-xs font-semibold">
-                    <span className="text-slate-300">Trophy Completion Progress</span>
-                    <span className="text-amber-400 font-mono font-bold">{achievements.completion_percentage}%</span>
-                  </div>
-                  <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-white/5">
-                    <div
-                      className="bg-gradient-to-r from-amber-500 to-yellow-400 h-2 rounded-full transition-all duration-500"
-                      style={{ width: `${achievements.completion_percentage}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {achievementsLoading ? (
-                <div className="py-12 text-center text-xs text-slate-400">Loading trophies and inspecting save state registers...</div>
-              ) : achievements?.achievements?.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  {achievements.achievements.map((a) => (
-                    <div
-                      key={a.id}
-                      className={`p-4 rounded-2xl border flex items-center justify-between gap-3.5 transition-all ${
-                        a.unlocked 
-                          ? 'bg-amber-950/20 border-amber-500/50 text-white shadow-md' 
-                          : 'bg-slate-900/60 border-white/10 text-slate-400 opacity-80 hover:opacity-100'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3.5 min-w-0">
-                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 shadow-inner border ${
-                          a.tier === 'platinum' ? 'bg-sky-950/60 border-sky-400/60 text-sky-300' :
-                          a.tier === 'gold' ? 'bg-yellow-950/60 border-yellow-400/60 text-yellow-400' :
-                          a.tier === 'silver' ? 'bg-slate-800 border-slate-400 text-slate-200' :
-                          'bg-amber-950/60 border-amber-600/60 text-amber-500'
-                        }`}>
-                          <Trophy className="w-6 h-6" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
-                            <span className="text-xs font-black text-white truncate">{a.title}</span>
-                            <span className={`text-[9px] uppercase font-bold px-1.5 py-0.2 rounded ${
-                              a.tier === 'platinum' ? 'bg-sky-950 text-sky-300 border border-sky-700' :
-                              a.tier === 'gold' ? 'bg-yellow-950 text-yellow-300 border border-yellow-700' :
-                              a.tier === 'silver' ? 'bg-slate-800 text-slate-300 border border-slate-600' :
-                              'bg-amber-950 text-amber-400 border border-amber-800'
-                            }`}>
-                              {a.tier || 'Trophy'}
-                            </span>
-                            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-black/60 text-amber-300 border border-white/10">
-                              +{a.points}P
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-slate-300 leading-snug">{a.description}</p>
-                          {a.unlocked ? (
-                            <div className="text-[10px] text-emerald-400 font-bold flex items-center gap-1 mt-1">
-                              <CheckCircle2 className="w-3 h-3" />
-                              <span>Unlocked {a.date_earned ? String(a.date_earned).slice(0, 10) : 'Active'}</span>
-                            </div>
-                          ) : (
-                            <div className="text-[10px] text-slate-500 font-medium flex items-center gap-1 mt-1">
-                              <span>Locked • Play game or create saves to unlock</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="py-12 text-center text-xs text-slate-400">No trophies registered for this title yet.</div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 7: OMNISYNC TIME-MACHINE SAVES */}
-          {modalTab === 'saves' && (
-            <div className="p-6 md:p-8 space-y-6 animate-in fade-in duration-200">
-              <div className="p-5 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-teal-950/30 to-slate-900 border border-emerald-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3.5">
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/50 flex items-center justify-center text-emerald-400 shadow-md">
-                    <RotateCcw className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                      <span>OmniSync: Time-Machine Checkpoints</span>
-                      <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700 font-black">
-                        100% Reversible
-                      </span>
-                    </h4>
-                    <p className="text-xs text-slate-300 mt-0.5">
-                      Rolling backup history for battery saves (.sav/.srm) and save states. Safety backup created before every rollback.
-                    </p>
-                  </div>
-                </div>
-
-                <form 
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    if (!newSnapshotLabel.trim()) return;
-                    try {
-                      await createSaveSnapshot({ game_id: game.id, label: newSnapshotLabel.trim() });
-                      playVictorySound();
-                      setNewSnapshotLabel('');
-                      const data = await fetchSaveSnapshots(game.id);
-                      setSnapshots(data.snapshots || []);
-                    } catch (err) {
-                      alert('Failed to create snapshot');
-                    }
-                  }} 
-                  className="flex gap-2 w-full sm:w-auto"
-                >
-                  <input
-                    type="text"
-                    value={newSnapshotLabel}
-                    onChange={(e) => setNewSnapshotLabel(e.target.value)}
-                    placeholder="New checkpoint label..."
-                    className="px-3 py-1.5 rounded-xl bg-slate-950 border border-white/10 text-white text-xs focus:outline-none focus:border-emerald-500"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!newSnapshotLabel.trim()}
-                    className="px-3.5 py-1.5 rounded-xl bg-emerald-500 text-black font-black text-xs flex items-center gap-1 cursor-pointer disabled:opacity-40"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Snapshot</span>
-                  </button>
-                </form>
-              </div>
-
-              {snapshotsLoading ? (
-                <div className="py-12 text-center text-xs text-slate-400">Loading historical save states...</div>
-              ) : snapshots.length > 0 ? (
-                <div className="space-y-2.5">
-                  {snapshots.map((s, idx) => (
-                    <div
-                      key={s.id || idx}
-                      className="p-4 rounded-2xl bg-slate-900/80 border border-white/10 hover:border-emerald-500/40 flex items-center justify-between gap-4 transition-all"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`px-2 py-0.2 rounded text-[9px] font-bold uppercase font-mono ${
-                            s.is_auto ? 'bg-blue-950 text-blue-300 border border-blue-800' : 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                          }`}>
-                            {s.is_auto ? 'Auto Checkpoint' : 'Manual Save'}
-                          </span>
-                          <span className="text-xs font-black text-white truncate">{s.label}</span>
-                        </div>
-                        <div className="flex items-center gap-3 text-[11px] text-slate-400">
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {s.timestamp}
-                          </span>
-                          <span>•</span>
-                          <span className="font-mono">{s.size_kb} KB</span>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={async () => {
-                          playClick();
-                          try {
-                            const res = await rollbackSaveSnapshot({ game_id: game.id, snapshot_id: s.id });
-                            playVictorySound();
-                            alert(res.message);
-                            const data = await fetchSaveSnapshots(game.id);
-                            setSnapshots(data.snapshots || []);
-                          } catch (err) {
-                            alert('Rollback failed: ' + err.message);
-                          }
-                        }}
-                        className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-emerald-500 hover:text-black text-slate-200 font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer flex-shrink-0"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        <span>Rollback</span>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="py-12 text-center text-xs text-slate-400">No historical checkpoints recorded yet.</div>
-              )}
-            </div>
-          )}
-
         </div>
-
       </div>
-
-      {/* In-App Interactive Emulator Player Modal */}
-      {showPlayer && (
-        <OmniPlayerModal
-          game={{
-            ...game,
-            path: game.path || (downloadState && downloadState.destination_path) || `/Volumes/ROMS/${game.platform}/${game.title}.${game.rom_format || 'zip'}`,
-          }}
-          onClose={() => setShowPlayer(false)}
-          onOpenSettings={onOpenSettings}
-          onOpenCheatLab={onOpenCheatLab}
-          onOpenModStore={onOpenModStore}
-        />
-      )}
     </dialog>
   );
 }

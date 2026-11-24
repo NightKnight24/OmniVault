@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 import urllib.parse
 from typing import List, Dict, Any, Optional
 from .base import BaseSearchProvider
+from ...services.mirror_resolver import title_matches_game
 
 class TorznabSearchProvider(BaseSearchProvider):
     def __init__(self, provider_id: str, name: str, endpoint_url: str, api_key: str = "", is_enabled: bool = True):
@@ -86,6 +87,9 @@ class TorznabSearchProvider(BaseSearchProvider):
 
                         for item in items:
                             title = item.get("title", "Unknown Title")
+                            matched, m_score = title_matches_game(query, title, platform=platform, strict=True)
+                            if not matched:
+                                continue
                             magnet = item.get("magneturl") or item.get("link") if str(item.get("link", "")).startswith("magnet:") else None
                             torrent_url = item.get("enclosure", {}).get("@url") or item.get("link") if not magnet else None
                             size_bytes = int(item.get("size", 0) or 0)
@@ -98,12 +102,15 @@ class TorznabSearchProvider(BaseSearchProvider):
                                 "platform": platform,
                                 "platform_name": platform,
                                 "source": f"{self.name} (Torznab)",
+                                "source_id": self.provider_id,
+                                "source_name": self.name,
                                 "direct_download_url": None,
                                 "magnet_uri": magnet,
                                 "torrent_url": torrent_url,
                                 "file_size_mb": size_mb,
                                 "seeders": seeders,
                                 "leechers": int(item.get("peers", 0) or 0),
+                                "match_score": m_score,
                                 "description": f"Retrieved via custom Torznab feed ({self.name}).",
                                 "year": None
                             })
@@ -119,6 +126,9 @@ class TorznabSearchProvider(BaseSearchProvider):
                         for item in channel.findall("item"):
                             title_elem = item.find("title")
                             title = title_elem.text if title_elem is not None and title_elem.text else "Unknown"
+                            matched, m_score = title_matches_game(query, title, platform=platform, strict=True)
+                            if not matched:
+                                continue
                             
                             enclosure = item.find("enclosure")
                             torrent_url = enclosure.get("url") if enclosure is not None else None
@@ -149,12 +159,15 @@ class TorznabSearchProvider(BaseSearchProvider):
                                 "platform": platform,
                                 "platform_name": platform,
                                 "source": f"{self.name} (Torznab)",
+                                "source_id": self.provider_id,
+                                "source_name": self.name,
                                 "direct_download_url": None,
                                 "magnet_uri": magnet_uri,
                                 "torrent_url": torrent_url,
                                 "file_size_mb": size_mb,
                                 "seeders": seeders,
                                 "leechers": leechers,
+                                "match_score": m_score,
                                 "description": f"Retrieved via user-configured Torznab feed ({self.name}).",
                                 "year": None
                             })

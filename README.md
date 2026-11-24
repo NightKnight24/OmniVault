@@ -1,23 +1,21 @@
-# OmniVault • Native Classic Retro Storefront & Preservation Hub
+# OmniVault • ROM Finder, Metadata Catalog & Download Manager
 
 <p align="center">
   <img src="frontend/public/icon.svg" width="128" height="128" alt="OmniVault Logo" />
 </p>
 
 <p align="center">
-  <strong>A high-performance, native macOS retro game metadata catalog, 3D interactive storefront, and standalone hardware emulator launcher powered by Bring Your Own Sources (BYOS).</strong>
+  <strong>A high-performance, native macOS ROM &amp; game finder, 122k+-syncable multi-system metadata catalog, cloud-enabled sequential download manager, and Strict BYOS (Bring Your Own Sources) scraper hub.</strong>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-macOS%2013%2B%20%7C%20Apple%20Silicon-blue?style=flat-square" alt="Platform" />
-  <img src="https://img.shields.io/badge/Metadata%20Catalog-67%2C594%20Titles-cyan?style=flat-square" alt="Catalog" />
-  <img src="https://img.shields.io/badge/Consoles-35%20Systems-purple?style=flat-square" alt="Consoles" />
+  <img src="https://img.shields.io/badge/Catalog-122k%2B%20Syncable%20Titles-cyan?style=flat-square" alt="Catalog" />
+  <img src="https://img.shields.io/badge/Systems-39%20Platforms%20(inc.%20Switch%202%2C%20PS5%2C%20Win%20%26%20Mac)-purple?style=flat-square" alt="Systems" />
   <a href="https://github.com/NightKnight24/OmniVault/releases"><img src="https://img.shields.io/github/v/release/NightKnight24/OmniVault?label=Release&style=flat-square&color=emerald" alt="Release" /></a>
-  <a href="https://github.com/users/NightKnight24/packages?repo_name=OmniVault"><img src="https://img.shields.io/badge/GHCR-Package%20v1.0.2-2496ED?style=flat-square&logo=docker&logoColor=white" alt="GitHub Package" /></a>
   <a href="https://github.com/NightKnight24/homebrew-omnivault"><img src="https://img.shields.io/badge/Homebrew-Tap-FBB040?style=flat-square&logo=homebrew&logoColor=black" alt="Homebrew Tap" /></a>
-  <a href="https://github.com/NightKnight24/OmniVault/issues"><img src="https://img.shields.io/github/issues/NightKnight24/OmniVault?style=flat-square&color=blue" alt="Issues" /></a>
-  <a href="https://github.com/NightKnight24/OmniVault/discussions"><img src="https://img.shields.io/badge/Discussions-Join%20Community-purple?style=flat-square" alt="Discussions" /></a>
-  <a href="https://github.com/NightKnight24/OmniVault"><img src="https://visitor-badge.laobi.icu/badge?page_id=NightKnight24.OmniVault&left_color=gray&right_color=blue" alt="Live Visitors" /></a>
+  <a href="https://github.com/NightKnight24/OmniVault/pkgs/container/omnivault"><img src="https://img.shields.io/badge/GHCR-Docker%202.0.0-2496ED?style=flat-square&logo=docker&logoColor=white" alt="GHCR Package" /></a>
+  <img src="https://img.shields.io/badge/Architecture-100%25%20BYOS-emerald?style=flat-square" alt="BYOS" />
   <img src="https://img.shields.io/badge/License-MIT-emerald?style=flat-square" alt="License" />
 </p>
 
@@ -25,172 +23,404 @@
 
 ## 🌟 Highlights
 
-- **Massive 67k Metadata & Lore Catalog**: An indexed encyclopedia of 67,594 classic games across 35 systems (PlayStation 1–4, PSP, Vita, Nintendo NES to Switch, GameCube, Wii, Wii U, NDS, 3DS, Sega Genesis, Saturn, Dreamcast, Xbox, Arcade, etc.) with release years, developers, reviews, and gameplay synopses *(Zero copyrighted ROM files bundled)*.
-- **Physical Media in 3D**: Real-time 3D rendered cartridges, CD jewel cases, DVD boxes, and optical game discs with interactive 360° spin and packaging views.
-- **Standalone Emulator Integration**: Seamless 1-click launch routines for 14 standalone native emulators (Dolphin, RetroArch, PCSX2, DuckStation, RPCS3, Ryujinx, Cemu, Azahar/Lime3DS, Vita3K, xemu, Xenia Canary, shadPS4, melonDS, PPSSPP).
-- **Bring Your Own Sources (BYOS)**: Ships 100% clean and legal. Connect Archive.org collections, Torznab/Prowlarr indexers, personal NAS servers, or community web directories.
-- **Embedded Local AI Copilot (OmniAI)**: Powered by local neural models (`Qwen2.5 0.5B`) running directly on Apple Silicon Metal GPUs. Answers gameplay questions, generates save file diffs, and provides walkthroughs without needing internet.
-- **Living-Room 10-Foot Kodi View**: Full controller-driven Big Picture mode with ambient glowing palettes, sound effects, and customizable themes.
+- **Live Multi-System Catalog Across 39 Systems**: Search and filter across classic arcade/8-bit systems through PlayStation 1–5 (**PS5**), PSP, PS Vita, Xbox / Xbox 360, GameCube, Wii, Wii U, Nintendo 3DS, Nintendo Switch, **Nintendo Switch 2**, plus **Windows (PC)** and **macOS** *(zero copyrighted ROM files bundled)*.
+- **Direct Cloud Storage Downloads (`iCloud Drive` • `Google Drive` • `OneDrive`)**: Download and extract ROMs & game bundles **straight to iCloud Drive, Google Drive, or Microsoft OneDrive** via zero-auth native desktop sync mounts or chunked Google Drive v3 / OneDrive Graph REST API uploads — selectable globally in Settings or per game before queuing.
+- **100% In-App Community Scrapers with Exact-Game Filtering**: Clicking any configured community source scrapes & queues downloads **directly inside OmniVault** (never opening external browser windows), with strict whole-word title normalization, Roman numeral & acronym resolution, sequel isolation, and Base/Update/DLC/Backport classification.
+- **Inline Trailers & Gameplay Previews**: Watch game trailers and gameplay directly inside each game's detail showcase alongside box art, screenshots, and synopses.
+- **Zero-Quota Full Catalog Sync & TheGamesDB Integration**: Ships with a shared community TheGamesDB key (plus optional personal API key) and a **1-click Sync All Platforms** powered by TheGamesDB's official static CDN dump (`122,400+` titles, `0` API quota consumed).
+- **Open Preservation Default (`archive.org`) + BYOS + Test All Sources**: Ships with only **Internet Archive (`archive.org`)** enabled out of the box (toggleable/removable in Settings), zero commercial ROM or torrent URLs hardcoded in code/databases, and a live concurrent **Test All Sources** health monitor across mirrors, Torznab/JSON/RSS feeds, TheGamesDB, Real-Debrid, and Cloud Drives.
+- **Real-Debrid High-Speed Unlock (BYOT)**: Validates your token on save and dynamically unlocks all **280+ supported file hosters** and cached BitTorrent magnets over HTTPS, excluding video/social sites.
+- **Sequential 1-at-a-Time Download Queue & Utilities**: Built-in HTTP direct downloader and `aria2c` BitTorrent worker executing strictly **1 download at a time** (reorder up/down/top, pause/resume queue, clear history), isolated per-title extraction for Windows/macOS/PS5, `CRC32`/`SHA1`/`MD5` checksum verification, lossless `.chd` / `.rvz` compression, and `.m3u` multi-disc playlist builder.
 
 ---
 
 ## 🚀 Quick Start Guide
 
 ### Option A: Install via Homebrew (Recommended)
-You can install OmniVault with one command via our official Homebrew tap:
 ```bash
 brew tap NightKnight24/omnivault
 brew install --cask omnivault
 ```
 
 ### Option B: Download Pre-compiled App (Zero Setup)
-Download the standalone native macOS Apple Silicon app directly from **[GitHub Releases](https://github.com/NightKnight24/OmniVault/releases/latest)**:
-1. Download **`OmniVault-v1.0.2-macOS-arm64.zip`**.
-2. Unzip and drag `OmniVault.app` to your `/Applications` folder.
+Download the standalone native macOS Apple Silicon app from **[GitHub Releases](https://github.com/NightKnight24/OmniVault/releases/latest)**:
+1. Download **`OmniVault-v2.0.0-macOS-arm64.zip`**.
+2. Unzip and drag `OmniVault.app` into `/Applications` (or `/Volumes/ROMS`).
 3. Double-click to launch!
 
-### Option C: Run via GitHub Packages (Docker / GHCR)
-Run the web storefront, 67,594-title catalog, and in-browser WebAssembly emulator anywhere:
+### Option C: Run via Docker / GHCR Package
+Run the web catalog finder and sequential download manager (complete with `aria2c`, `7z`, and Google Drive / OneDrive REST cloud uploads):
 ```bash
-docker run -d -p 19842:19842 --name omnivault ghcr.io/nightknight24/omnivault:latest
+docker run -d -p 19842:19842 \
+  -v omnivault-data:/app/backend/data \
+  -v /path/to/roms:/roms \
+  --name omnivault \
+  ghcr.io/nightknight24/omnivault:latest
 ```
 
 ### Option D: Run From Source
-Requirements: macOS 13.0+, Python 3.11+ / `uv`.
+Requirements: macOS 13.0+ (Apple Silicon recommended), Python 3.11+ / `uv`, Node.js / `npm`.
 ```bash
 git clone https://github.com/NightKnight24/OmniVault.git
 cd OmniVault
-./run.sh
+./build_app.sh   # or ./run.sh for development server
+open /Volumes/ROMS/OmniVault.app
 ```
 
 ---
 
-## 📖 Complete Tutorial: Bring Your Own Sources (BYOS)
+## ☁️ Direct Cloud Storage Downloads (iCloud Drive, Google Drive & OneDrive)
 
-OmniVault is engineered with a **Bring Your Own Sources (BYOS)** architecture. Out of the box, the public repository contains **zero copyrighted game ROMs and zero hardcoded commercial links**.
+OmniVault supports two seamless ways to download ROMs and games straight into your cloud storage:
 
-Instead, OmniVault gives you a powerful multi-protocol scraping engine that connects your library to your preferred storage locations:
+1. **Zero-Config Native Cloud Sync Folders (macOS & Windows)**:
+   - OmniVault automatically detects local synced folders for **iCloud Drive** (`~/Library/Mobile Documents/com~apple~CloudDocs`), **Google Drive** (`~/Library/CloudStorage/GoogleDrive-*/My Drive`), and **Microsoft OneDrive** (`~/Library/CloudStorage/OneDrive*` or `~/OneDrive`).
+   - Open **Settings → Storage & Downloads** (or the **Save Straight To** bar on any game card/modal) and select **iCloud Drive**, **Google Drive**, or **OneDrive**. Downloads and extracted archives write directly into `<CloudDrive>/OmniVault/ROMs/<Platform>/` and sync automatically in the background.
+2. **Direct Cloud REST API Uploads (Docker / Headless / Token Auth)**:
+   - Open **Settings → Storage & Downloads → Cloud Drive Destinations → API Token** for **Google Drive** or **OneDrive**, paste an OAuth access token (and optional refresh token + client ID), click **Test**, and save.
+   - Completed downloads & compressed bundles automatically stream to `OmniVault ROMs/<Platform>/` via chunked resumable uploads with live progress & speed in the Download Queue, and can optionally remove the temporary local staging copy upon completion.
 
+---
+
+## 📖 Default Source & Bring Your Own Sources (BYOS)
+
+Out of the box, OmniVault enables only **Internet Archive (`archive.org`)** via its official open-preservation search and metadata API (`archive_org` adapter), which can be toggled off or deleted anytime in Settings. Zero commercial ROM or torrent URLs are hardcoded — you supply any additional external sources and personal tokens you want to use:
+
+### Method 1: Import a JSON Source Pack (Recommended)
+1. Open **Settings → Sources & APIs**.
+2. Scroll to **Import / Export BYOS Source Pack (JSON)**.
+3. Paste a JSON Source Pack (or load a `.json` file from disk) and click **Import Source Pack**.
+
+### Method 2: Connecting Torznab / Prowlarr / Jackett or Custom Feeds
+1. Open **Settings → Sources & APIs**.
+2. Choose **torznab**, **json_torrent_api**, or **rss_torrent_feed** (or click the **Prowlarr** / **Jackett** localhost presets).
+3. Enter your **Endpoint URL** and optional **API Key**, click **Test Connection**, and **Save Provider**.
+
+### Method 3: Real-Debrid & TheGamesDB Tokens
+1. Under **Settings → Sources & APIs → TheGamesDB Metadata & Box Art**, OmniVault uses the built-in shared public key automatically, or you can enter your own free key from `thegamesdb.net` and use **Sync Titles** to pull Switch 2 / modern console catalogs.
+2. Under **Settings → Sources & APIs → Real-Debrid High-Speed Debrid**, paste your personal token from `real-debrid.com/apitoken` to unlock HTTPS unrestriction for hoster links and cached magnets.
+
+---
+
+## 📦 Example BYOS Source Pack (JSON)
+
+None of the sites below are hardcoded into OmniVault. Copy this JSON block (or save it as `sources.json`) and import it locally under **Settings → Sources & APIs → Import / Export BYOS Source Pack**:
+
+```json
+{
+  "version": 1,
+  "mirror_sources": [
+    {
+      "id": "r-roms",
+      "name": "r/roms Megathread",
+      "url": "https://r-roms.gitlab.io/",
+      "adapter": "directory_link",
+      "type": "Curated Preservation Directory",
+      "description": "Reddit r/roms community directory for curated No-Intro & Redump collections.",
+      "platforms": ["3DS", "PSVita", "NDS", "PSP", "PS1", "PS2", "PS3", "Switch", "Xbox", "Xbox360", "PS4", "GameCube", "Wii", "N64", "GBA", "SNES", "NES", "Genesis", "Dreamcast", "Saturn"],
+      "search_template": "https://r-roms.gitlab.io/",
+      "supports_direct_download": false,
+      "priority": 70,
+      "is_enabled": true,
+      "config": {}
+    },
+    {
+      "id": "consoleroms",
+      "name": "ConsoleRoms",
+      "url": "https://www.consoleroms.com/",
+      "adapter": "slug_cdn",
+      "type": "Retro ROM Directory",
+      "description": "Fast index of classic console and arcade titles with direct CDN downloads.",
+      "platforms": ["GBA", "GBC", "GB", "NDS", "SNES", "NES", "N64", "PS1", "PS2", "Xbox", "Arcade"],
+      "search_template": "https://www.consoleroms.com/search?search_term_string={title}",
+      "supports_direct_download": true,
+      "priority": 10,
+      "is_enabled": true,
+      "config": {
+        "search_path": "/search?search_term_string={query}",
+        "item_path_prefix": "/roms/",
+        "download_suffix": "/download",
+        "cdn_url_regex": "https://downloads\\.consoleroms\\.com/roms/[^\"<>\\r\\n;]+",
+        "cdn_domains": ["downloads.consoleroms.com", "consoleroms.com"],
+        "platform_map": {
+          "SNES": "snes",
+          "NES": "nes",
+          "N64": "n64",
+          "GBA": "gba",
+          "GBC": "gbc",
+          "GB": "gb",
+          "PS1": "psx",
+          "PS2": "ps2",
+          "NDS": "nds",
+          "Arcade": "mame"
+        }
+      }
+    },
+    {
+      "id": "romsfun",
+      "name": "RomsFun",
+      "url": "https://romsfun.com/",
+      "adapter": "wp_ajax_cdn",
+      "type": "Multi-Region Archive",
+      "description": "Multi-region catalog with AJAX direct CDN stream resolution.",
+      "platforms": ["3DS", "PSVita", "PSP", "NDS", "PS1", "PS2", "PS3", "PS4", "Xbox", "Xbox360", "Switch", "Wii", "GameCube", "GBA", "SNES"],
+      "search_template": "https://romsfun.com/?s={title}",
+      "supports_direct_download": true,
+      "priority": 15,
+      "is_enabled": true,
+      "config": {
+        "search_path": "/?s={query}",
+        "item_path_contains": "/roms/",
+        "download_path_contains": "/download/",
+        "ajax_path": "/wp-admin/admin-ajax.php",
+        "ajax_action": "k_get_download",
+        "cdn_domains": ["romsfast.com", "psgamedl.com"],
+        "platform_slugs": {
+          "PS4": ["playstation-4", "ps4"],
+          "PS3": ["playstation-3", "ps3"],
+          "PS2": ["playstation-2", "ps2"],
+          "PS1": ["playstation-1", "playstation", "ps1", "psx"],
+          "PSP": ["playstation-portable", "psp"],
+          "PSVita": ["playstation-vita", "psvita", "vita"],
+          "Xbox": ["xbox"],
+          "Xbox360": ["xbox-360", "xbox360"],
+          "GameCube": ["gamecube", "gc"],
+          "Wii": ["nintendo-wii", "wii"],
+          "WiiU": ["wii-u", "wiiu"],
+          "Switch": ["nintendo-switch", "switch"],
+          "NDS": ["nintendo-ds", "nds"],
+          "3DS": ["nintendo-3ds", "3ds"],
+          "GBA": ["game-boy-advance", "gba"],
+          "GBC": ["game-boy-color", "gbc"],
+          "GB": ["game-boy", "gb"],
+          "SNES": ["super-nintendo", "snes"],
+          "NES": ["nintendo-entertainment-system", "nes"],
+          "N64": ["nintendo-64", "n64"],
+          "Genesis": ["sega-genesis", "genesis", "mega-drive"],
+          "Dreamcast": ["sega-dreamcast", "dreamcast"],
+          "Saturn": ["sega-saturn", "saturn"]
+        }
+      }
+    },
+    {
+      "id": "ziperto",
+      "name": "Ziperto",
+      "url": "https://www.ziperto.com/",
+      "adapter": "wp_hoster",
+      "type": "Handheld Preservation Mirror",
+      "description": "Switch, Switch 2, 3DS, and PS Vita Base/Update/DLC archive with Real-Debrid hoster extraction.",
+      "platforms": ["Switch", "Switch2", "3DS", "PSVita"],
+      "search_template": "https://www.ziperto.com/?s={title}",
+      "supports_direct_download": false,
+      "priority": 20,
+      "is_enabled": true,
+      "config": {
+        "search_path": "/?s={query}",
+        "link_selector": "a[rel='bookmark'], h2 a, h3 a",
+        "file_kind": "rom",
+        "platform_keywords": {
+          "3DS": ["3ds", "cia"],
+          "PSVita": ["vita", "vpk", "nonpdrm"],
+          "Switch": ["switch", "nsp", "xci"],
+          "Switch2": ["switch", "nsp", "xci"]
+        }
+      }
+    },
+    {
+      "id": "dlpsgame",
+      "name": "DLPSGame",
+      "url": "https://dlpsgame.com/",
+      "adapter": "wp_hoster",
+      "type": "PlayStation PKG Mirror",
+      "description": "PS5, PS4, and PS3 Base/Update/DLC/Backport PKG mirror with Real-Debrid hoster extraction.",
+      "platforms": ["PS5", "PS4", "PS3"],
+      "search_template": "https://dlpsgame.com/?s={title}",
+      "supports_direct_download": false,
+      "priority": 22,
+      "is_enabled": true,
+      "config": {
+        "search_path": "/?s={query}",
+        "link_selector": "a[href]",
+        "file_kind": "pkg",
+        "title_clean_regex": "\\b(PS5|PS4|PS3|PKG|Free Download|v\\d\\.\\d+)\\b",
+        "platform_keywords": {
+          "PS5": ["ps5"],
+          "PS3": ["ps3"],
+          "PS4": ["ps4", "pkg"]
+        }
+      }
+    },
+    {
+      "id": "nswvault",
+      "name": "NSWVault",
+      "url": "https://nswvault.com/",
+      "adapter": "wp_hoster",
+      "type": "Nintendo Switch NSP/XCI Mirror",
+      "description": "Dedicated Nintendo Switch & Switch 2 NSP, XCI, NSZ, update, and DLC directory.",
+      "platforms": ["Switch", "Switch2"],
+      "search_template": "https://nswvault.com/?s={title}",
+      "supports_direct_download": false,
+      "priority": 24,
+      "is_enabled": true,
+      "config": {
+        "search_path": "/?s={query}",
+        "link_selector": "a[href*='/roms/']",
+        "subpage_link_regex": "/download/\\d+",
+        "exclude_path_parts": ["/category/", "/tag/", "/author/", "orderby=", "page/", "#"],
+        "title_clean_regex": "\\b(ROM Download|Download)\\b",
+        "file_kind": "rom"
+      }
+    },
+    {
+      "id": "romslab",
+      "name": "RomsLab",
+      "url": "https://romslab.com/",
+      "adapter": "wp_hoster",
+      "type": "Modern & Retro Releases",
+      "description": "Catalog of Switch, Switch 2, PS5, PS4, and retro releases with hoster mirrors.",
+      "platforms": ["Switch", "Switch2", "PS5", "PS3", "PS4", "Xbox", "Xbox360", "3DS", "PSVita", "NDS", "Retro"],
+      "search_template": "https://romslab.com/?s={title}",
+      "supports_direct_download": false,
+      "priority": 26,
+      "is_enabled": true,
+      "config": {
+        "search_path": "/?s={query}",
+        "link_selector": "h2 a, h3 a",
+        "platform_keywords": {
+          "PS5": ["ps5"],
+          "PS4": ["ps4"]
+        }
+      }
+    },
+    {
+      "id": "blueroms",
+      "name": "BlueRoms",
+      "url": "https://www.blueroms.ws/",
+      "adapter": "platform_listing_token",
+      "type": "Direct High-Speed Mirror",
+      "description": "Tokenized CDN mirror for 3DS, Vita, Switch, PSP, NDS, PS1-4 & Xbox.",
+      "platforms": ["3DS", "PSVita", "PSP", "NDS", "PS1", "PS2", "PS3", "PS4", "Xbox", "Xbox360", "GameCube", "Wii", "Switch", "Switch2", "N64", "GBA", "SNES", "Genesis", "Dreamcast", "Arcade"],
+      "search_template": "https://www.blueroms.ws/",
+      "supports_direct_download": true,
+      "priority": 30,
+      "is_enabled": true,
+      "config": {
+        "listing_path": "/{platform_slug}",
+        "game_href_template": "/game/{platform_slug}/",
+        "token_href_regex": "^/download/gAAAAAB",
+        "cdn_url_regex": "https://files\\.blueroms\\.ws/",
+        "cdn_domains": ["files.blueroms.ws", "blueroms.ws"],
+        "default_platform_slug": "3ds",
+        "platform_map": {
+          "3DS": "3ds",
+          "PSVita": "psvita",
+          "PSP": "psp",
+          "NDS": "nds",
+          "PS1": "ps1",
+          "PS2": "ps2",
+          "PS3": "ps3",
+          "PS4": "ps4",
+          "Xbox": "xbox",
+          "Xbox360": "xbox360",
+          "GameCube": "gamecube",
+          "Wii": "wii",
+          "Switch": "switch",
+          "Switch2": "switch2",
+          "N64": "n64",
+          "GBA": "gba",
+          "SNES": "snes",
+          "Genesis": "genesis",
+          "Dreamcast": "dreamcast",
+          "Arcade": "arcade",
+          "NeoGeo": "neogeo"
+        }
+      }
+    },
+    {
+      "id": "romsgames",
+      "name": "RomsGames",
+      "url": "https://www.romsgames.net/",
+      "adapter": "html_search",
+      "type": "Retro ROM Portal",
+      "description": "Retro ROM portal & release search.",
+      "platforms": ["NDS", "PSP", "GBA", "PS1", "PS2", "SNES", "NES", "N64", "GameCube", "Wii", "Genesis"],
+      "search_template": "https://www.romsgames.net/search/?q={title}",
+      "supports_direct_download": false,
+      "priority": 45,
+      "is_enabled": true,
+      "config": {
+        "search_path": "/search/?q={query}",
+        "row_selector": "a[href]",
+        "result_href_regex": "(?:-rom-|/roms/)",
+        "exclude_keywords": ["emulator", "roms", "page"]
+      }
+    },
+    {
+      "id": "vimm",
+      "name": "Vimm's Lair",
+      "url": "https://vimm.net/",
+      "adapter": "html_search",
+      "type": "Historical Preservation Vault",
+      "description": "Vintage vault catalog search and preservation verification.",
+      "platforms": ["NES", "SNES", "N64", "GBA", "GameCube", "Wii", "PS1", "PS2", "PS3", "Xbox", "Xbox360", "PSP", "Genesis", "Dreamcast", "Saturn"],
+      "search_template": "https://vimm.net/vault/?p=list&q={title}",
+      "supports_direct_download": false,
+      "priority": 50,
+      "is_enabled": true,
+      "config": {
+        "search_path": "/vault/?p=list&q={query}",
+        "row_selector": "tr a",
+        "result_href_regex": "^/vault/"
+      }
+    }
+  ],
+  "providers": [
+    {
+      "id": "tpb_games",
+      "name": "The Pirate Bay",
+      "type": "json_torrent_api",
+      "endpoint_url": "https://apibay.org/q.php",
+      "is_enabled": true,
+      "config": {
+        "query_param": "q",
+        "cat_param": "cat",
+        "category": "400"
+      }
+    },
+    {
+      "id": "nyaa_games",
+      "name": "Nyaa.si",
+      "type": "rss_torrent_feed",
+      "endpoint_url": "https://nyaa.si/",
+      "is_enabled": true,
+      "config": {
+        "rss_query_template": "?page=rss&q={query}&c=6_0",
+        "trackers": [
+          "http://nyaa.tracker.wf:7777/announce",
+          "udp://open.stealth.si:80/announce",
+          "udp://tracker.opentrackr.org:1337/announce",
+          "udp://tracker.torrent.eu.org:451/announce"
+        ]
+      }
+    }
+  ],
+  "search_templates": [
+    {
+      "id": "tpl-duckduckgo",
+      "name": "DuckDuckGo Preservation Search",
+      "url_template": "https://duckduckgo.com/?q={title}+{platform}+preservation",
+      "description": "General web search shortcut",
+      "is_enabled": true
+    }
+  ]
+}
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                          OmniVault Core Hub                            │
-│           (67,594 Game Metadata • 3D Covers • Emulator Launchers)      │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-         ┌─────────────────────────┼─────────────────────────┐
-         ▼                         ▼                         ▼
-┌──────────────────┐      ┌──────────────────┐      ┌──────────────────┐
-│  Archive.org     │      │ Torrent / Magnet │      │ Personal NAS /   │
-│  Collections     │      │ (Torznab/Apibay) │      │ Open Directories │
-└──────────────────┘      └──────────────────┘      └──────────────────┘
-```
-
-### Method 1: Adding an Archive.org Collection
-Internet Archive hosts thousands of verified public domain, homebrew, and community game collections:
-1. Open OmniVault and navigate to **Settings** (or click the **Sources** icon in the navbar).
-2. Under **Custom Providers**, select **Add Source**.
-3. Choose **Internet Archive** and enter:
-   - **Name**: e.g. `SNES Preservation Archive`
-   - **Collection / Item Identifier**: e.g. `nointro-snes` or any collection identifier from `archive.org/details/<identifier>`.
-4. Click **Save Source**. OmniVault's indexer will automatically match the collection's files against your catalog, activating 1-click downloads for matched games.
-
----
-
-### Method 2: Connecting Torznab / Prowlarr / Jackett (BitTorrent)
-If you run a local media server with **Prowlarr** or **Jackett**:
-1. Open **Settings → Sources → Add Provider**.
-2. Select **Torznab Indexer**.
-3. Fill in:
-   - **Endpoint URL**: e.g. `http://localhost:9696/prowlarr/1/api`
-   - **API Key**: Your Prowlarr / Jackett API key.
-4. Click **Test Connection**. OmniVault will verify the feed. When you search for high-capacity titles (e.g., PS2, PS3, GameCube), OmniVault will query your indexer and download files via its native `aria2c` BitTorrent engine.
-
----
-
-### Method 3: Pointing to a Personal NAS / HTTP Web Directory
-If you have an Apache, Nginx, or home NAS file server:
-1. Ensure directory listing is enabled on your folder (e.g. `http://nas.local/roms/snes/`).
-2. In **Settings → Sources**, enter your web directory URL.
-3. OmniVault's scraper will scan matching `.zip`, `.7z`, `.sfc`, or `.iso` archives and link them directly to the corresponding game cards.
-
----
-
-### Method 4: Community Web Search Helpers (Vimm's Lair, RomsFun, etc.)
-Some third-party websites (like Vimm's Lair, RomsFun, or Ziperto) use Cloudflare challenges, captchas, and timer redirects to prevent automated apps from scraping them.
-
-OmniVault solves this with **Web Search Helpers**:
-1. Open any game's detail modal (e.g. *Chrono Trigger*).
-2. Under **Community Source & Web Lookups**, click:
-   - `[ Internet Archive ↗ ]`
-   - `[ DuckDuckGo ↗ ]`
-   - `[ Vimm's Lair ↗ ]`
-   - `[ RomsFun ↗ ]`
-3. The query opens directly in your browser. Download the file, and OmniVault's auto-import listener in your `~/Downloads` folder will detect it, move it to `/Volumes/ROMS/<Platform>`, and mark it as ready to play!
-
----
-
-### Method 5: Manually Attaching a Direct Link or Magnet
-If you have an exact link or magnet URI:
-1. Open the game details modal.
-2. Click **Attach Source URL**.
-3. Paste the direct `.zip` / `.iso` link or `magnet:?xt=urn:...` link.
-4. Click **Save Link**. The download button will immediately activate for that game.
-
----
-
-## 🎮 Hardware Emulators & BIOS Guide
-
-OmniVault integrates natively with 13 standalone emulators:
-
-| System / Console | Recommended Emulator | ROM Directory | Required BIOS / Keys |
-| :--- | :--- | :--- | :--- |
-| **NES, SNES, Genesis, GBA, Arcade** | **RetroArch** | `SNES/`, `NES/`, `Genesis/`, `GBA/` | Included in core / None |
-| **GameCube, Wii** | **Dolphin Engine** | `GameCube/`, `Wii/` | None (DSP LLE optional) |
-| **PlayStation 1 (PS1)** | **DuckStation** / **RetroArch** | `PS1/` | `scph5501.bin` in `BIOS/` |
-| **PlayStation 2 (PS2)** | **PCSX2** | `PS2/` | `SCPH-39001.bin` in `BIOS/` |
-| **PlayStation 3 (PS3)** | **RPCS3** | `PS3/` | `PS3UPDAT.PUP` (Sony Firmware) |
-| **Nintendo 3DS** | **Azahar / Lime3DS** | `3DS/` | None (AesKeys optional) |
-| **Nintendo Switch** | **Ryujinx** | `Switch/` | `prod.keys` & `title.keys` in `BIOS/` |
-| **Nintendo Wii U** | **Cemu** | `WiiU/` | None |
-| **Nintendo DS** | **melonDS** | `NDS/` | `bios7.bin`, `bios9.bin`, `firmware.bin` |
-| **Original Xbox** | **xemu** | `Xbox/` | `mcpx_1.0.bin` & `Complex_4627.bin` |
-| **PS Vita** | **Vita3K** | `PSVita/` | `PSP2UPDAT.PUP` (Sony Firmware) |
-
-### Automatic BIOS Verification
-Open **Settings → BIOS & Firmware Audit** to see a live visual status indicator for all systems. OmniVault automatically scans your `BIOS/` folder and matches checksums for required firmware files.
-
----
-
-## 🧠 Local Neural AI Copilot (OmniAI)
-
-OmniVault comes equipped with an embedded local LLM copilot:
-- **Model**: `Qwen2.5 0.5B Instruct` (GGUF format).
-- **Hardware Acceleration**: Apple Silicon Metal GPU offload (runs offline with 0 cloud dependencies).
-- **Features**:
-  - Natural language game recommendations ("Find 2-player co-op beat-em-ups on Sega Genesis").
-  - Walkthrough assistance when you're stuck on a puzzle or boss.
-  - Non-destructive save state diffing (analyzing money/lives offsets).
-
-To enable the local neural model:
-1. Open **Settings → AI Copilot**.
-2. Click **Download Local Neural Model (469 MB)**. OmniVault will fetch it once from HuggingFace and cache it in `backend/data/models/`.
-
----
-
-## 📺 Living-Room Kodi 10-Foot Mode
-
-Press the **Kodi Mode** button in the top navigation bar or press `F11` to toggle the 10-foot living-room media center view:
-- Seamless navigation with DualSense, DualShock 4, Xbox Series X/S, or Nintendo Switch Pro controllers.
-- Ambient glowing banners, game sound effects, and audio feedback.
-- Customizable theme engine: Kodi Estuary, PlayStation Quantum Flow, SNES Super Classic, Cyberpunk Neon, and CRT Arcade.
 
 ---
 
 ## 🛠️ Developer & Build Guide
 
 ### Running in Development Mode
-Run frontend and backend independently with live hot-reloading:
-
 ```bash
 # Terminal 1: Backend API
 cd backend
@@ -205,35 +435,19 @@ npm run dev
 ```
 
 ### Compiling the Standalone macOS App Bundle
-To compile `OmniVault.app` with the native Swift WKWebView wrapper:
 ```bash
 ./build_app.sh
 ```
-This packages the frontend build, backend service, and native arm64 binary into `OmniVault.app`.
-
----
-
-## 💬 Community, Issues & Discussions
-
-Connect with fellow preservation enthusiasts, ask questions, share source templates, or report bugs:
-
-- 💬 **[Join GitHub Discussions](https://github.com/NightKnight24/OmniVault/discussions)**:
-  - **Q&A**: Get help with emulator configurations, BIOS placement, or gamepad setup.
-  - **Ideas & Feature Requests**: Propose new console cores, theme designs, or UI improvements.
-  - **Source Lists & Community Feeds**: Share public domain archives and legal preservation collections.
-- 🐛 **[Submit an Issue or Bug Report](https://github.com/NightKnight24/OmniVault/issues)**:
-  - Report unexpected errors, launch failures, or scraper glitches.
-- ⭐ **Star the Repository**:
-  - If you enjoy OmniVault, star the repository to support historical game preservation!
+This builds `frontend/dist`, packages the Python backend and runtime, compiles the native `arm64` Swift binary, and signs `OmniVault.app`.
 
 ---
 
 ## ⚖️ Legal Disclaimer
 
-- **OmniVault is an open-source software project** developed for historical game preservation, educational study, and fair-use cataloging of homebrew and public-domain retro software.
-- OmniVault **does not host, bundle, or distribute any copyrighted game ROMs, proprietary BIOS dumps, or cryptographic decryption keys**.
-- All product names, logos, trademarks, and registered trademarks belong to their respective owners (Nintendo, Sony Interactive Entertainment, Microsoft, Sega, Capcom, Square Enix, Konami, Bandai Namco, etc.). Reference to these trademarks does not imply any affiliation, sponsorship, or endorsement.
-- Users are solely responsible for ensuring that their use of external preservation sources complies with their local copyright laws.
+- **OmniVault is an open-source software project** developed for historical game cataloging, preservation metadata indexing, and file management.
+- OmniVault **does not host, bundle, or distribute any copyrighted game ROMs, proprietary BIOS dumps, decryption keys, or hardcoded commercial download links**.
+- All product names, logos, and trademarks belong to their respective owners.
+- Users are solely responsible for ensuring that any external BYOS sources they add comply with applicable local laws.
 
 ---
 

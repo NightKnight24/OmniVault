@@ -150,6 +150,18 @@ def init_db():
     );
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_ratings_game_id ON user_ratings(game_id);")
+
+    # Cached Game Videos (Trailer & Gameplay YouTube IDs)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS game_videos (
+        game_id TEXT PRIMARY KEY,
+        trailer_id TEXT,
+        trailer_title TEXT,
+        gameplay_id TEXT,
+        gameplay_title TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
     
     # Default settings
     if sys.platform == "win32":
@@ -162,7 +174,7 @@ def init_db():
     cursor.execute("""
     INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_extract', 'true')
     """)
-    # Custom Indexer & Search Providers (Torznab / Newznab, etc.)
+    # Custom Indexer & Search Providers (Torznab / JSON / RSS)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS custom_providers (
         id TEXT PRIMARY KEY,
@@ -170,6 +182,32 @@ def init_db():
         type TEXT NOT NULL DEFAULT 'torznab',
         endpoint_url TEXT NOT NULL,
         api_key TEXT DEFAULT '',
+        config_json TEXT DEFAULT '{}',
+        is_enabled INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # Safe column migration for existing custom_providers tables
+    cursor.execute("PRAGMA table_info(custom_providers)")
+    prov_cols = {r[1] for r in cursor.fetchall()}
+    if "config_json" not in prov_cols:
+        cursor.execute("ALTER TABLE custom_providers ADD COLUMN config_json TEXT DEFAULT '{}'")
+
+    # Custom BYOS Mirror & Scraper Sources (Zero hardcoded commercial/ROM sites)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS custom_mirror_sources (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        url TEXT NOT NULL,
+        adapter TEXT NOT NULL DEFAULT 'html_search',
+        source_type TEXT DEFAULT 'User Mirror Source',
+        description TEXT DEFAULT '',
+        platforms TEXT DEFAULT '[]',
+        search_template TEXT DEFAULT '',
+        supports_direct_download INTEGER DEFAULT 0,
+        config_json TEXT DEFAULT '{}',
+        priority INTEGER DEFAULT 50,
         is_enabled INTEGER DEFAULT 1,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -187,19 +225,6 @@ def init_db():
     );
     """)
 
-    # Themes table for Kodi / XBMC hybrid themes and AI generated palettes
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS themes (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        description TEXT,
-        is_builtin INTEGER DEFAULT 0,
-        is_active INTEGER DEFAULT 0,
-        theme_data TEXT NOT NULL, -- JSON with colors, glows, backgrounds, font
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """)
-
     # Seed default sample template if table is empty
     cursor.execute("SELECT COUNT(*) FROM custom_search_templates")
     if cursor.fetchone()[0] == 0:
@@ -208,164 +233,30 @@ def init_db():
         VALUES ('tpl-duckduckgo', 'DuckDuckGo Preservation Search', 'https://duckduckgo.com/?q={title}+{platform}+preservation', 'General web search shortcut', 1)
         """)
 
-    # Seed built-in themes
-    cursor.execute("SELECT COUNT(*) FROM themes WHERE is_builtin = 1")
-    if cursor.fetchone()[0] == 0:
-        builtin_themes = [
-            {
-                "id": "kodi_hybrid",
-                "name": "Kodi / XBMC Estuary Hybrid",
-                "description": "Living-room 10-foot media center theme with deep navy, neon cyan, and cinematic charcoal.",
-                "is_builtin": 1,
-                "is_active": 1,
-                "theme_data": json.dumps({
-                    "id": "kodi_hybrid",
-                    "accent": "#00d2ff",
-                    "accentSecondary": "#0ea5e9",
-                    "glow": "rgba(0, 210, 255, 0.45)",
-                    "bgBase": "#070c16",
-                    "bgCard": "#0c1527",
-                    "bgCardHover": "#14223c",
-                    "border": "rgba(0, 210, 255, 0.2)",
-                    "textPrimary": "#f8fafc",
-                    "textMuted": "#94a3b8",
-                    "mode": "kodi",
-                    "fontFamily": "Inter, sans-serif"
-                })
-            },
-            {
-                "id": "playstation_flow",
-                "name": "PlayStation 5 Quantum Flow",
-                "description": "Sony PlayStation universe aesthetic with cosmic midnight, quantum royal blue, and laser cyan highlights.",
-                "is_builtin": 1,
-                "is_active": 0,
-                "theme_data": json.dumps({
-                    "id": "playstation_flow",
-                    "accent": "#0070d1",
-                    "accentSecondary": "#00f0ff",
-                    "glow": "rgba(0, 112, 209, 0.5)",
-                    "bgBase": "#030814",
-                    "bgCard": "#071228",
-                    "bgCardHover": "#0d1f42",
-                    "border": "rgba(0, 112, 209, 0.3)",
-                    "textPrimary": "#ffffff",
-                    "textMuted": "#8ea6c8",
-                    "mode": "playstation",
-                    "fontFamily": "Inter, sans-serif"
-                })
-            },
-            {
-                "id": "nintendo_horizon",
-                "name": "Nintendo Horizon Hybrid",
-                "description": "Switch Horizon living-room aesthetic with matte slate, signature scarlet red, and Joy-Con neon cyan.",
-                "is_builtin": 1,
-                "is_active": 0,
-                "theme_data": json.dumps({
-                    "id": "nintendo_horizon",
-                    "accent": "#e60012",
-                    "accentSecondary": "#00c3e3",
-                    "glow": "rgba(230, 0, 18, 0.45)",
-                    "bgBase": "#0b0d11",
-                    "bgCard": "#14171e",
-                    "bgCardHover": "#1d222c",
-                    "border": "rgba(230, 0, 18, 0.25)",
-                    "textPrimary": "#ffffff",
-                    "textMuted": "#9ba3af",
-                    "mode": "nintendo",
-                    "fontFamily": "Inter, sans-serif"
-                })
-            },
-            {
-                "id": "xbox_velocity",
-                "name": "Xbox Velocity Matrix",
-                "description": "Carbon gunmetal, Matrix acid emerald green, and high-velocity digital accents.",
-                "is_builtin": 1,
-                "is_active": 0,
-                "theme_data": json.dumps({
-                    "id": "xbox_velocity",
-                    "accent": "#107c10",
-                    "accentSecondary": "#2fe70e",
-                    "glow": "rgba(16, 124, 16, 0.5)",
-                    "bgBase": "#080c09",
-                    "bgCard": "#0f1811",
-                    "bgCardHover": "#17261a",
-                    "border": "rgba(16, 124, 16, 0.3)",
-                    "textPrimary": "#f0fdf4",
-                    "textMuted": "#86efac",
-                    "mode": "xbox",
-                    "fontFamily": "Inter, sans-serif"
-                })
-            },
-            {
-                "id": "sega_dreamcast",
-                "name": "Sega 128-Bit Dream",
-                "description": "Classic Sega heritage with Sonic royal blue, Dreamcast spiral orange, and crisp white geometry.",
-                "is_builtin": 1,
-                "is_active": 0,
-                "theme_data": json.dumps({
-                    "id": "sega_dreamcast",
-                    "accent": "#ff6600",
-                    "accentSecondary": "#0060a9",
-                    "glow": "rgba(255, 102, 0, 0.45)",
-                    "bgBase": "#060a12",
-                    "bgCard": "#0c1524",
-                    "bgCardHover": "#142138",
-                    "border": "rgba(255, 102, 0, 0.25)",
-                    "textPrimary": "#ffffff",
-                    "textMuted": "#93c5fd",
-                    "mode": "sega",
-                    "fontFamily": "Inter, sans-serif"
-                })
-            },
-            {
-                "id": "cyberpunk_neo",
-                "name": "Cyberpunk Neo-Vault",
-                "description": "Ultra-vibrant synthwave aesthetic with hot magenta, laser cyan, and deep violet darkness.",
-                "is_builtin": 1,
-                "is_active": 0,
-                "theme_data": json.dumps({
-                    "id": "cyberpunk_neo",
-                    "accent": "#ec4899",
-                    "accentSecondary": "#06b6d4",
-                    "glow": "rgba(236, 72, 153, 0.5)",
-                    "bgBase": "#090514",
-                    "bgCard": "#130a24",
-                    "bgCardHover": "#1e1038",
-                    "border": "rgba(236, 72, 153, 0.3)",
-                    "textPrimary": "#fdf2f8",
-                    "textMuted": "#f472b6",
-                    "mode": "cyberpunk",
-                    "fontFamily": "Chakra Petch, sans-serif"
-                })
-            },
-            {
-                "id": "crt_amber_arcade",
-                "name": "Retro CRT Amber Arcade",
-                "description": "Warm retro CRT phosphor amber, arcade cabinet obsidian, and nostalgic phosphor glow.",
-                "is_builtin": 1,
-                "is_active": 0,
-                "theme_data": json.dumps({
-                    "id": "crt_amber_arcade",
-                    "accent": "#f59e0b",
-                    "accentSecondary": "#fbbf24",
-                    "glow": "rgba(245, 158, 11, 0.45)",
-                    "bgBase": "#0a0804",
-                    "bgCard": "#161208",
-                    "bgCardHover": "#221c0e",
-                    "border": "rgba(245, 158, 11, 0.25)",
-                    "textPrimary": "#fffbeb",
-                    "textMuted": "#fcd34d",
-                    "mode": "retro_crt",
-                    "fontFamily": "Chakra Petch, monospace"
-                })
-            }
-        ]
-        for t in builtin_themes:
-            cursor.execute("""
-            INSERT INTO themes (id, name, description, is_builtin, is_active, theme_data)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """, (t["id"], t["name"], t["description"], t["is_builtin"], t["is_active"], t["theme_data"]))
-    
+    # Seed single default open-preservation source (Internet Archive) once on initial setup/migration
+    cursor.execute("SELECT value FROM settings WHERE key = 'default_archive_source_seeded'")
+    if cursor.fetchone() is None:
+        cursor.execute("""
+        INSERT OR IGNORE INTO custom_mirror_sources (
+            id, name, url, adapter, source_type, description, platforms,
+            search_template, supports_direct_download, config_json, priority, is_enabled
+        ) VALUES (
+            'archive-org',
+            'Internet Archive (Archive.org)',
+            'https://archive.org/',
+            'archive_org',
+            'Open Preservation Library',
+            'Default open-access preservation archive powered by the official Internet Archive public search & metadata API.',
+            '["ALL"]',
+            'https://archive.org/search.php?query={title}+{platform}',
+            1,
+            '{}',
+            40,
+            1
+        )
+        """)
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('default_archive_source_seeded', '1')")
+
     conn.commit()
     conn.close()
 

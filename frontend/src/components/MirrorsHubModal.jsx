@@ -1,14 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { 
   X, Globe, Server, CheckCircle2, AlertCircle, RefreshCw, 
-  Download, Search, ExternalLink, Zap, ShieldCheck, Activity, Layers
+  Download, Search, ExternalLink, Zap, ShieldCheck, Activity, Layers, Cloud
 } from 'lucide-react';
-import { fetchMirrorSources, searchMirrors, importAndDownloadMirror, testMirrorSource } from '../services/api';
+import {
+  fetchMirrorSources, searchMirrors, importAndDownloadMirror,
+  testAllSources, fetchCloudTargets
+} from '../services/api';
 
-export default function MirrorsHubModal({ isOpen, onClose, onDownloadQueued }) {
+export default function MirrorsHubModal({ isOpen, onClose, onDownloadQueued, onOpenSettings }) {
   const [sources, setSources] = useState([]);
   const [isLoadingSources, setIsLoadingSources] = useState(true);
   const [isPinging, setIsPinging] = useState(false);
+  const [healthSummary, setHealthSummary] = useState(null);
+  const [cloudInfo, setCloudInfo] = useState({ default_target: 'local', targets: [] });
+  const [destinationTarget, setDestinationTarget] = useState('local');
   
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -25,13 +31,21 @@ export default function MirrorsHubModal({ isOpen, onClose, onDownloadQueued }) {
   useEffect(() => {
     if (isOpen) {
       loadSources();
+      fetchCloudTargets()
+        .then((res) => {
+          if (res) {
+            setCloudInfo(res);
+            setDestinationTarget(res.default_target || 'local');
+          }
+        })
+        .catch(() => {});
     }
   }, [isOpen]);
 
   const loadSources = async () => {
     setIsLoadingSources(true);
     try {
-      const data = await fetchMirrorSources();
+      const data = await fetchMirrorSources(true);
       setSources(data.sources || []);
     } catch (err) {
       console.error('Failed to load mirror sources:', err);
@@ -43,8 +57,20 @@ export default function MirrorsHubModal({ isOpen, onClose, onDownloadQueued }) {
   const handlePingAll = async () => {
     setIsPinging(true);
     try {
-      const data = await fetchMirrorSources();
-      setSources(data.sources || []);
+      const [data, testRes] = await Promise.all([
+        fetchMirrorSources(false),
+        testAllSources(),
+      ]);
+      const byId = {};
+      (testRes.mirrors || []).forEach((m) => {
+        if (m?.source_id) byId[m.source_id] = m;
+      });
+      const merged = (data.sources || []).map((s) => {
+        const h = byId[s.id];
+        return h ? { ...s, status: h.status, latency_ms: h.latency_ms, http_code: h.http_code } : s;
+      });
+      setSources(merged);
+      setHealthSummary(testRes.summary || null);
     } catch (err) {
       console.error('Ping failed:', err);
     } finally {
@@ -77,14 +103,19 @@ export default function MirrorsHubModal({ isOpen, onClose, onDownloadQueued }) {
   const handleImportDownload = async (item) => {
     setDownloadingUrl(item.direct_url);
     try {
+      const targetName =
+        destinationTarget === 'local'
+          ? 'Local Drive'
+          : (cloudInfo.targets?.find((t) => t.id === destinationTarget)?.name || destinationTarget);
       await importAndDownloadMirror({
         title: item.title,
         platform: item.platform,
         direct_url: item.direct_url,
         filename: item.filename,
-        source_name: item.source_name
+        source_name: item.source_name,
+        destination_target: destinationTarget,
       });
-      setDownloadSuccess(`Queued download for "${item.title}" via ${item.source_name}! Check Downloads tab.`);
+      setDownloadSuccess(`Queued download for "${item.title}" via ${item.source_name} → ${targetName}! Check Downloads tab.`);
       if (onDownloadQueued) onDownloadQueued();
     } catch (err) {
       alert(`Download failed: ${err.message}`);
@@ -110,7 +141,7 @@ export default function MirrorsHubModal({ isOpen, onClose, onDownloadQueued }) {
                 <h2 className="text-lg font-bold tracking-tight text-white">ROM Scraper & Mirror Network</h2>
                 <span className="px-2 py-0.5 text-xs font-semibold bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 rounded-full flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                  {sources.length || 9} Sources Active
+                  {sources.length} {sources.length === 1 ? 'Source' : 'Sources'} Configured
                 </span>
               </div>
               <p className="text-xs text-slate-400">
@@ -123,10 +154,10 @@ export default function MirrorsHubModal({ isOpen, onClose, onDownloadQueued }) {
             <button
               onClick={handlePingAll}
               disabled={isPinging}
-              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 flex items-center gap-1.5 transition-all disabled:opacity-50"
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isPinging ? 'animate-spin text-cyan-400' : ''}`} />
-              {isPinging ? 'Pinging...' : 'Ping Latency'}
+              {isPinging ? 'Testing All...' : 'Test All Sources'}
             </button>
             <button
               onClick={onClose}
@@ -156,13 +187,38 @@ export default function MirrorsHubModal({ isOpen, onClose, onDownloadQueued }) {
                 <Server className="w-4 h-4 text-cyan-400" />
                 Active Preservation Sources & Mirror Hubs
               </h3>
-              <span className="text-xs text-slate-400">All sources monitored live</span>
+              <span className="text-xs text-slate-400">
+                {healthSummary
+                  ? `${healthSummary.online} Online • ${healthSummary.degraded} Degraded • ${healthSummary.offline} Offline (mirrors & feeds)`
+                  : 'All sources monitored live'}
+              </span>
             </div>
 
             {isLoadingSources ? (
               <div className="py-8 flex justify-center items-center gap-2 text-slate-400 text-xs">
                 <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
                 Querying source health & latencies...
+              </div>
+            ) : sources.length === 0 ? (
+              <div className="p-5 rounded-xl bg-slate-900/60 border border-dashed border-cyan-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="text-xs text-slate-300 space-y-1">
+                  <div className="font-bold text-white">No BYOS Mirror Sources Configured Yet</div>
+                  <p className="text-slate-400">
+                    All mirror sources are currently removed. Re-add Internet Archive (<span className="font-mono text-cyan-300">archive_org</span>) or import your own BYOS sources and JSON Source Pack inside Settings.
+                  </p>
+                </div>
+                {onOpenSettings && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenSettings();
+                    }}
+                    className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-black whitespace-nowrap cursor-pointer shrink-0"
+                  >
+                    Open Settings → Sources &amp; APIs
+                  </button>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -258,9 +314,17 @@ export default function MirrorsHubModal({ isOpen, onClose, onDownloadQueued }) {
                 <option value="NDS">Nintendo DS / DSi</option>
                 <option value="PSP">Sony PSP</option>
                 <option value="Switch">Nintendo Switch</option>
+                <option value="Switch2">Nintendo Switch 2</option>
+                <option value="WiiU">Nintendo Wii U</option>
                 <option value="PS1">Sony PlayStation 1</option>
                 <option value="PS2">Sony PlayStation 2</option>
                 <option value="PS3">Sony PlayStation 3</option>
+                <option value="PS4">Sony PlayStation 4</option>
+                <option value="PS5">Sony PlayStation 5</option>
+                <option value="Xbox">Microsoft Xbox</option>
+                <option value="Xbox360">Xbox 360</option>
+                <option value="Windows">Windows (PC)</option>
+                <option value="macOS">macOS</option>
                 <option value="GameCube">Nintendo GameCube</option>
                 <option value="Wii">Nintendo Wii</option>
                 <option value="N64">Nintendo 64</option>
@@ -276,7 +340,7 @@ export default function MirrorsHubModal({ isOpen, onClose, onDownloadQueued }) {
                 onChange={(e) => setSelectedSource(e.target.value)}
                 className="px-3 py-2 bg-slate-950/70 border border-slate-700 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-cyan-500"
               >
-                <option value="">All 9 Sources (Simultaneous)</option>
+                <option value="">All Sources (Simultaneous)</option>
                 {sources.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
@@ -291,6 +355,46 @@ export default function MirrorsHubModal({ isOpen, onClose, onDownloadQueued }) {
                 {isSearching ? 'Scraping...' : 'Search Mirrors'}
               </button>
             </form>
+
+            {/* Save To Destination Strip */}
+            <div className="flex items-center justify-between flex-wrap gap-2 pt-1 text-xs">
+              <span className="text-slate-400 flex items-center gap-1.5 font-medium">
+                <Cloud className="w-3.5 h-3.5 text-sky-400" />
+                <span>Save Downloads To:</span>
+              </span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {[
+                  { id: 'local', label: 'Local Drive', available: true },
+                  ...(cloudInfo.targets || []).map((t) => ({
+                    id: t.id,
+                    label: t.name,
+                    available: Boolean(t.available),
+                  })),
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      if (!opt.available && onOpenSettings) {
+                        onClose();
+                        onOpenSettings();
+                      } else {
+                        setDestinationTarget(opt.id);
+                      }
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${
+                      destinationTarget === opt.id
+                        ? 'bg-sky-500/20 text-sky-200 border-sky-400/60'
+                        : opt.available
+                        ? 'bg-slate-800/80 text-slate-300 border-white/10 hover:border-white/25'
+                        : 'bg-slate-900/50 text-slate-500 border-white/5 hover:text-slate-300'
+                    }`}
+                  >
+                    {opt.label}{!opt.available ? ' (+ Setup)' : ''}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* Success Message Banner */}
             {downloadSuccess && (
