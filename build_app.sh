@@ -54,9 +54,9 @@ if [ -z "$STANDALONE_PY_SRC" ]; then
     done
 fi
 if [ -z "$STANDALONE_PY_SRC" ] && command -v uv >/dev/null 2>&1; then
-    PY_BIN_FOUND="$(uv python find 3.14 2>/dev/null || true)"
+    PY_BIN_FOUND="$(uv python find --managed-python 3.14 2>/dev/null || uv python find 3.14 2>/dev/null || true)"
     if [ -n "$PY_BIN_FOUND" ] && [ -e "$PY_BIN_FOUND" ]; then
-        STANDALONE_PY_SRC="$(cd "$(dirname "$PY_BIN_FOUND")/.." && pwd)"
+        STANDALONE_PY_SRC="$(python3 -c 'import os,sys; p=os.path.realpath(sys.argv[1]); print(os.path.realpath(os.path.dirname(os.path.dirname(p))))' "$PY_BIN_FOUND")"
     fi
 fi
 if [ ! -d "$RESOURCES_DIR/python" ]; then
@@ -87,15 +87,17 @@ python3 - "$RESOURCES_DIR/python" << 'PYEOF'
 import sys, pathlib
 root = pathlib.Path(sys.argv[1])
 local_user = pathlib.Path.home().name.encode("utf-8")
-if local_user and local_user.lower() != b"nightknight24":
+if local_user and local_user.lower() not in (b"nightknight24", b"runner"):
     base = b"nightknight24"
     repl = (base * ((len(local_user) // len(base)) + 1))[:len(local_user)]
     assert len(local_user) == len(repl)
+    needle = b"/Users/" + local_user + b"/"
+    target = b"/Users/" + repl + b"/"
     for p in root.rglob("*"):
         if p.is_file() and not p.is_symlink() and p.suffix in (".dylib", ".so", ".py", ".cfg", ".json"):
             data = p.read_bytes()
-            if local_user in data:
-                p.write_bytes(data.replace(local_user, repl))
+            if needle in data:
+                p.write_bytes(data.replace(needle, target))
 PYEOF
 
 # Clean up dev venv or backup files inside Resources to ensure clean standalone app

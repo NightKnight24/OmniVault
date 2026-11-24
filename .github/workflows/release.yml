@@ -16,7 +16,7 @@ permissions:
 jobs:
   build-macos-arm64:
     name: Build Signed macOS Apple Silicon App & Publish Release
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -42,6 +42,7 @@ jobs:
 
       - name: Verify Code Signature & Bundle Hygiene
         run: |
+          PYTHONDONTWRITEBYTECODE=1 SSL_CERT_FILE=/etc/ssl/cert.pem "${{ runner.temp }}/OmniVault.app/Contents/Resources/python/bin/python3.14" -B -c "import sys; sys.path.insert(0, '${{ runner.temp }}/OmniVault.app/Contents/Resources/backend'); import app.main; print('CI_BACKEND_IMPORT_OK')"
           codesign --verify --verbose "${{ runner.temp }}/OmniVault.app"
           PYCACHE_COUNT=$(find "${{ runner.temp }}/OmniVault.app" -type d -name "__pycache__" | wc -l | tr -d ' ')
           echo "PYCACHE_COUNT=$PYCACHE_COUNT"
