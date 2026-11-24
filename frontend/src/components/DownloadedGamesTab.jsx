@@ -21,10 +21,10 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
   const [checksumResults, setChecksumResults] = useState({});
   const [extractingPath, setExtractingPath] = useState(null);
 
-  const loadInstalled = async () => {
+  const loadInstalled = async (forceRefresh = false) => {
     setLoading(true);
     try {
-      const res = await fetchInstalledGames();
+      const res = await fetchInstalledGames(forceRefresh);
       setInstalledGames(res.installed || []);
     } catch (err) {
       console.error('Failed to load downloaded ROMs:', err);
@@ -50,7 +50,7 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
       const res = await scanLocalCollection();
       playVictorySound();
       showToast(res.message || `Scanned ${res.total_scanned} ROMs!`);
-      loadInstalled();
+      loadInstalled(true);
     } catch (e) {
       alert(`Collection scan error: ${e.message}`);
     } finally {
@@ -85,7 +85,7 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
       const res = await extractArchive(path);
       playVictorySound();
       showToast(`Successfully unpacked ${title} (${res.extracted_count} files)`);
-      loadInstalled();
+      loadInstalled(true);
     } catch (err) {
       showToast(`Failed to extract archive: ${err.message}`);
     } finally {
@@ -99,15 +99,19 @@ export default function DownloadedGamesTab({ onSelectGame, onNavigateStore, onOp
       await deleteInstalledGame(path);
       setDeletingPath(null);
       showToast(`Deleted "${title}" from ROM library`);
-      loadInstalled();
+      loadInstalled(true);
     } catch (err) {
       showToast(`Failed to delete file: ${err.message}`);
     }
   };
 
   const filtered = installedGames.filter(g => {
-    const matchPlat = selectedPlat === 'ALL' || g.platform.toLowerCase() === selectedPlat.toLowerCase();
-    const matchSearch = !search || g.title.toLowerCase().includes(search.toLowerCase()) || g.filename.toLowerCase().includes(search.toLowerCase());
+    const plat = (g.platform || '').toLowerCase();
+    const title = (g.title || '').toLowerCase();
+    const fname = (g.filename || '').toLowerCase();
+    const q = search.toLowerCase();
+    const matchPlat = selectedPlat === 'ALL' || plat === selectedPlat.toLowerCase();
+    const matchSearch = !search || title.includes(q) || fname.includes(q);
     return matchPlat && matchSearch;
   });
 

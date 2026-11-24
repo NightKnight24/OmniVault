@@ -1,10 +1,17 @@
 const API_BASE = '/api';
 
-export async function fetchGames(params = {}) {
+export async function fetchGames(params = {}, signal = undefined) {
   const query = new URLSearchParams();
   if (params.platform && params.platform !== 'ALL') query.set('platform', params.platform);
   if (params.family && params.family !== 'ALL') query.set('family', params.family);
   if (params.genre && params.genre !== 'ALL') query.set('genre', params.genre);
+  if (params.developer && params.developer !== 'ALL') query.set('developer', params.developer);
+  if (params.publisher && params.publisher !== 'ALL') query.set('publisher', params.publisher);
+  if (params.esrb && params.esrb !== 'ALL') query.set('esrb', params.esrb);
+  if (params.players && params.players !== 'ALL') query.set('players', params.players);
+  if (params.coop) query.set('coop', 'true');
+  if (params.decade && params.decade !== 'ALL') query.set('decade', String(params.decade));
+  if (params.year) query.set('year', String(params.year));
   if (params.search) query.set('search', params.search);
   if (params.sort) query.set('sort', params.sort);
   if (params.page) query.set('page', params.page);
@@ -12,26 +19,29 @@ export async function fetchGames(params = {}) {
   if (params.featured_only) query.set('featured_only', 'true');
   if (params.favorites_only) query.set('favorites_only', 'true');
 
-  const res = await fetch(`${API_BASE}/games?${query.toString()}`);
+  const res = await fetch(`${API_BASE}/games?${query.toString()}`, {
+    cache: 'no-store',
+    signal,
+  });
   if (!res.ok) throw new Error('Failed to fetch games');
   return res.json();
 }
 
 export async function fetchGame(id) {
-  const res = await fetch(`${API_BASE}/games/${id}`);
+  const res = await fetch(`${API_BASE}/games/${id}`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to fetch game details');
   return res.json();
 }
 export const fetchGameById = fetchGame;
 
 export async function fetchPlatforms() {
-  const res = await fetch(`${API_BASE}/games/meta/platforms`);
+  const res = await fetch(`${API_BASE}/games/meta/platforms`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to fetch platforms');
   return res.json();
 }
 
 export async function fetchConsoleFamilies() {
-  const res = await fetch(`${API_BASE}/games/meta/families`);
+  const res = await fetch(`${API_BASE}/games/meta/families`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to fetch console families');
   return res.json();
 }
@@ -41,8 +51,18 @@ export async function fetchGenres(platform = 'ALL', family = 'ALL') {
   if (platform && platform !== 'ALL') query.set('platform', platform);
   if (family && family !== 'ALL') query.set('family', family);
   const qStr = query.toString() ? `?${query.toString()}` : '';
-  const res = await fetch(`${API_BASE}/games/meta/genres${qStr}`);
+  const res = await fetch(`${API_BASE}/games/meta/genres${qStr}`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to fetch genres');
+  return res.json();
+}
+
+export async function fetchCatalogFilters(platform = 'ALL', family = 'ALL') {
+  const query = new URLSearchParams();
+  if (platform && platform !== 'ALL') query.set('platform', platform);
+  if (family && family !== 'ALL') query.set('family', family);
+  const qStr = query.toString() ? `?${query.toString()}` : '';
+  const res = await fetch(`${API_BASE}/games/meta/filters${qStr}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('Failed to fetch catalog filter facets');
   return res.json();
 }
 
@@ -86,13 +106,14 @@ export async function scanLocalCollection() {
 }
 
 export async function fetchDownloads() {
-  const res = await fetch(`${API_BASE}/downloads`);
+  const res = await fetch(`${API_BASE}/downloads`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to fetch downloads');
   return res.json();
 }
 
-export async function fetchInstalledGames() {
-  const res = await fetch(`${API_BASE}/downloads/installed`);
+export async function fetchInstalledGames(refresh = false) {
+  const qs = refresh ? '?refresh=true' : '';
+  const res = await fetch(`${API_BASE}/downloads/installed${qs}`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to fetch downloaded ROMs');
   return res.json();
 }
@@ -667,7 +688,7 @@ export async function fetchStorageVolumes() {
 }
 
 export async function fetchCloudTargets() {
-  const res = await fetch(`${API_BASE}/storage/cloud-targets`);
+  const res = await fetch(`${API_BASE}/storage/cloud-targets`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to fetch cloud storage targets');
   return res.json();
 }
@@ -692,5 +713,31 @@ export async function testCloudTarget(payload) {
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error('Failed to test cloud target');
+  return res.json();
+}
+
+export async function startCloudOAuth(payload) {
+  const res = await fetch(`${API_BASE}/storage/cloud-oauth/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to start cloud sign-in');
+  }
+  return res.json();
+}
+
+export async function openCloudSystemSignIn(payload) {
+  const res = await fetch(`${API_BASE}/storage/cloud-signin-system`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to open cloud sign-in');
+  }
   return res.json();
 }

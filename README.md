@@ -5,16 +5,16 @@
 </p>
 
 <p align="center">
-  <strong>A high-performance, native macOS ROM &amp; game finder, 122k+-syncable multi-system metadata catalog, cloud-enabled sequential download manager, and Strict BYOS (Bring Your Own Sources) scraper hub.</strong>
+  <strong>A high-performance, native macOS ROM &amp; game finder, 130k+ syncable 150+-system metadata catalog, zero-local-disk cloud streaming download manager, and Strict BYOS (Bring Your Own Sources) scraper hub.</strong>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-macOS%2013%2B%20%7C%20Apple%20Silicon-blue?style=flat-square" alt="Platform" />
-  <img src="https://img.shields.io/badge/Catalog-122k%2B%20Syncable%20Titles-cyan?style=flat-square" alt="Catalog" />
-  <img src="https://img.shields.io/badge/Systems-39%20Platforms%20(inc.%20Switch%202%2C%20PS5%2C%20Win%20%26%20Mac)-purple?style=flat-square" alt="Systems" />
+  <img src="https://img.shields.io/badge/Catalog-130k%2B%20Syncable%20Titles-cyan?style=flat-square" alt="Catalog" />
+  <img src="https://img.shields.io/badge/Systems-150%2B%20Platforms%20(inc.%20Switch%202%2C%20PS5%2C%20Xbox%20Series%20X%2C%20Win%20%26%20Mac)-purple?style=flat-square" alt="Systems" />
   <a href="https://github.com/NightKnight24/OmniVault/releases"><img src="https://img.shields.io/github/v/release/NightKnight24/OmniVault?label=Release&style=flat-square&color=emerald" alt="Release" /></a>
   <a href="https://github.com/NightKnight24/homebrew-omnivault"><img src="https://img.shields.io/badge/Homebrew-Tap-FBB040?style=flat-square&logo=homebrew&logoColor=black" alt="Homebrew Tap" /></a>
-  <a href="https://github.com/NightKnight24/OmniVault/pkgs/container/omnivault"><img src="https://img.shields.io/badge/GHCR-Docker%202.0.0-2496ED?style=flat-square&logo=docker&logoColor=white" alt="GHCR Package" /></a>
+  <a href="https://github.com/NightKnight24/OmniVault/pkgs/container/omnivault"><img src="https://img.shields.io/badge/GHCR-Docker%202.1.0-2496ED?style=flat-square&logo=docker&logoColor=white" alt="GHCR Package" /></a>
   <img src="https://img.shields.io/badge/Architecture-100%25%20BYOS-emerald?style=flat-square" alt="BYOS" />
   <img src="https://img.shields.io/badge/License-MIT-emerald?style=flat-square" alt="License" />
 </p>
@@ -23,12 +23,12 @@
 
 ## 🌟 Highlights
 
-- **Live Multi-System Catalog Across 39 Systems**: Search and filter across classic arcade/8-bit systems through PlayStation 1–5 (**PS5**), PSP, PS Vita, Xbox / Xbox 360, GameCube, Wii, Wii U, Nintendo 3DS, Nintendo Switch, **Nintendo Switch 2**, plus **Windows (PC)** and **macOS** *(zero copyrighted ROM files bundled)*.
-- **Direct Cloud Storage Downloads (`iCloud Drive` • `Google Drive` • `OneDrive`)**: Download and extract ROMs & game bundles **straight to iCloud Drive, Google Drive, or Microsoft OneDrive** via zero-auth native desktop sync mounts or chunked Google Drive v3 / OneDrive Graph REST API uploads — selectable globally in Settings or per game before queuing.
+- **Full 150+ System TheGamesDB Catalog & Metadata Organizer**: 1-click **Resync Catalog** downloads all games across **150+ consoles, handhelds, computers & modern platforms** (**PS5**, **Nintendo Switch 2**, **Xbox Series X/S**, **Xbox One**, **Windows**, **macOS**, **Amiga**, **3DO**, classic 8/16/32/64-bit consoles & arcade) with all **30 categories/genres**, **8,700+ developers**, **4,700+ publishers**, **ESRB age ratings**, **multiplayer & co-op filters**, release eras, verified front box art, 1080p fanart backdrops, and screenshots — using `0` API quota calls *(zero copyrighted ROM files bundled)*.
+- **Cloud Sign-In & Zero-Local-Disk Direct Streaming (`iCloud Drive` • `Google Drive` • `OneDrive`)**: Connect your cloud drive via **1-click System / Desktop App Sign-In** or **OAuth 2.0 PKCE Browser "Sign in & Allow"**, streaming ROMs and Real-Debrid downloads straight through an 8–10 MB RAM buffer into dedicated **`OmniVault/ROMs/<Console>/`** folders with **zero bytes written to your local drive** (plus optional automatic local copy offload after iCloud sync).
 - **100% In-App Community Scrapers with Exact-Game Filtering**: Clicking any configured community source scrapes & queues downloads **directly inside OmniVault** (never opening external browser windows), with strict whole-word title normalization, Roman numeral & acronym resolution, sequel isolation, and Base/Update/DLC/Backport classification.
 - **Inline Trailers & Gameplay Previews**: Watch game trailers and gameplay directly inside each game's detail showcase alongside box art, screenshots, and synopses.
-- **Zero-Quota Full Catalog Sync & TheGamesDB Integration**: Ships with a shared community TheGamesDB key (plus optional personal API key) and a **1-click Sync All Platforms** powered by TheGamesDB's official static CDN dump (`122,400+` titles, `0` API quota consumed).
-- **Open Preservation Default (`archive.org`) + BYOS + Test All Sources**: Ships with only **Internet Archive (`archive.org`)** enabled out of the box (toggleable/removable in Settings), zero commercial ROM or torrent URLs hardcoded in code/databases, and a live concurrent **Test All Sources** health monitor across mirrors, Torznab/JSON/RSS feeds, TheGamesDB, Real-Debrid, and Cloud Drives.
+- **Instant Filtering & 1-Click Resync**: Indexed SQLite queries (`<15ms`), abortable debounced filtering, `no-store` cache control, and toolbar **Refresh** + **Resync Catalog** buttons.
+- **Open Preservation Default (`archive.org`) + BYOS + Test All Sources**: Ships with only **Internet Archive (`archive.org`)** enabled out of the box (toggleable/removable in Settings), zero commercial ROM or torrent URLs hardcoded in runtime code/databases, and a live concurrent **Test All Sources** health monitor across mirrors, Torznab/JSON/RSS feeds, TheGamesDB, Real-Debrid, and Cloud Drives.
 - **Real-Debrid High-Speed Unlock (BYOT)**: Validates your token on save and dynamically unlocks all **280+ supported file hosters** and cached BitTorrent magnets over HTTPS, excluding video/social sites.
 - **Sequential 1-at-a-Time Download Queue & Utilities**: Built-in HTTP direct downloader and `aria2c` BitTorrent worker executing strictly **1 download at a time** (reorder up/down/top, pause/resume queue, clear history), isolated per-title extraction for Windows/macOS/PS5, `CRC32`/`SHA1`/`MD5` checksum verification, lossless `.chd` / `.rvz` compression, and `.m3u` multi-disc playlist builder.
 
@@ -44,7 +44,7 @@ brew install --cask omnivault
 
 ### Option B: Download Pre-compiled App (Zero Setup)
 Download the standalone native macOS Apple Silicon app from **[GitHub Releases](https://github.com/NightKnight24/OmniVault/releases/latest)**:
-1. Download **`OmniVault-v2.0.0-macOS-arm64.zip`**.
+1. Download **`OmniVault-v2.1.0-macOS-arm64.zip`**.
 2. Unzip and drag `OmniVault.app` into `/Applications` (or `/Volumes/ROMS`).
 3. Double-click to launch!
 
@@ -69,16 +69,16 @@ open /Volumes/ROMS/OmniVault.app
 
 ---
 
-## ☁️ Direct Cloud Storage Downloads (iCloud Drive, Google Drive & OneDrive)
+## ☁️ Cloud Sign-In & Zero-Local-Disk Streaming (iCloud Drive, Google Drive & OneDrive)
 
-OmniVault supports two seamless ways to download ROMs and games straight into your cloud storage:
+Every cloud download is automatically organized into its own dedicated console folder under **`OmniVault/ROMs/<Console>/`** (for example, `OmniVault/ROMs/SNES/`, `OmniVault/ROMs/PS5/`, `OmniVault/ROMs/Switch2/`):
 
-1. **Zero-Config Native Cloud Sync Folders (macOS & Windows)**:
-   - OmniVault automatically detects local synced folders for **iCloud Drive** (`~/Library/Mobile Documents/com~apple~CloudDocs`), **Google Drive** (`~/Library/CloudStorage/GoogleDrive-*/My Drive`), and **Microsoft OneDrive** (`~/Library/CloudStorage/OneDrive*` or `~/OneDrive`).
-   - Open **Settings → Storage & Downloads** (or the **Save Straight To** bar on any game card/modal) and select **iCloud Drive**, **Google Drive**, or **OneDrive**. Downloads and extracted archives write directly into `<CloudDrive>/OmniVault/ROMs/<Platform>/` and sync automatically in the background.
-2. **Direct Cloud REST API Uploads (Docker / Headless / Token Auth)**:
-   - Open **Settings → Storage & Downloads → Cloud Drive Destinations → API Token** for **Google Drive** or **OneDrive**, paste an OAuth access token (and optional refresh token + client ID), click **Test**, and save.
-   - Completed downloads & compressed bundles automatically stream to `OmniVault ROMs/<Platform>/` via chunked resumable uploads with live progress & speed in the Download Queue, and can optionally remove the temporary local staging copy upon completion.
+1. **1-Click Browser "Sign in & Allow" (OAuth 2.0 Loopback + PKCE — Zero Local Disk Usage)**:
+   - Open **Settings → Storage & Downloads → Cloud Drive Destinations** for **Google Drive** or **OneDrive**, enter your free public Desktop OAuth Client ID once (no client secret needed with PKCE; zero Google/Microsoft keys are ever bundled in GitHub), and click **Browser Sign-In**.
+   - Click **Allow** in your browser — OmniVault catches the loopback callback at `127.0.0.1:19842` and enables **Direct Cloud Streaming**, piping HTTP & Real-Debrid downloads straight through an 8–10 MB RAM buffer into `OmniVault/ROMs/<Console>/` with **0 bytes written to your local drive**.
+2. **1-Click System & Desktop App Sign-In (`iCloud Drive`, `Google Drive`, `OneDrive`)**:
+   - Click **Sign in to iCloud** (opens macOS Apple Account / iCloud Settings) or **Sign in (GDrive / OneDrive App)** to connect via native cloud mounts (`~/Library/Mobile Documents/com~apple~CloudDocs` and `~/Library/CloudStorage/*`).
+   - Enable **Cloud-Only Mode (Offload local copy after sync)** to automatically evict local blocks via macOS `brctl evict` once uploaded.
 
 ---
 

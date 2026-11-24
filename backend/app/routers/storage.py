@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException, Body, Query, Request
+from fastapi.responses import HTMLResponse
 from typing import Dict, Any, Optional
 from ..services.storage_service import (
     get_storage_config,
@@ -11,8 +12,11 @@ from ..services.storage_service import (
     complete_setup
 )
 from ..services.cloud_storage_service import (
+    complete_cloud_oauth_callback,
     get_cloud_targets_status,
+    open_cloud_system_signin,
     save_cloud_targets_config,
+    start_cloud_oauth_flow,
     test_cloud_target,
 )
 
@@ -132,3 +136,49 @@ async def verify_cloud_target(payload: Dict[str, Any] = Body(...)):
     """Tests write access or REST API authentication for iCloud Drive, Google Drive, or OneDrive."""
     provider_id = payload.get("provider_id", "")
     return await test_cloud_target(provider_id, payload)
+
+
+@router.post("/cloud-signin-system")
+def launch_cloud_system_signin(payload: Dict[str, Any] = Body(...)):
+    """Opens native macOS iCloud settings or official Google Drive / OneDrive desktop sign-in."""
+    try:
+        provider_id = payload.get("provider_id", "")
+        return open_cloud_system_signin(provider_id)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to launch sign-in: {str(e)}")
+
+
+@router.post("/cloud-oauth/start")
+def initiate_cloud_oauth(request: Request, payload: Dict[str, Any] = Body(...)):
+    """Starts OAuth 2.0 PKCE browser 'Sign in & Allow' flow for Google Drive or OneDrive."""
+    try:
+        base_url = f"{request.url.scheme}://{request.url.netloc}"
+        return start_cloud_oauth_flow(
+            provider_id=payload.get("provider_id", ""),
+            client_id=payload.get("client_id"),
+            client_secret=payload.get("client_secret"),
+            redirect_base=base_url,
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start OAuth sign-in: {str(e)}")
+
+
+@router.get("/cloud-oauth/callback", response_class=HTMLResponse)
+async def handle_cloud_oauth_callback(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    error_description: Optional[str] = Query(None),
+):
+    """Receives OAuth 2.0 PKCE loopback callback and stores cloud tokens locally."""
+    html_page = await complete_cloud_oauth_callback(
+        code=code,
+        state=state,
+        error=error,
+        error_description=error_description,
+    )
+    return HTMLResponse(content=html_page)

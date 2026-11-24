@@ -66,14 +66,14 @@ def invalidate_installed_cache():
     _INSTALLED_CACHE["timestamp"] = 0.0
 
 @router.get("/installed")
-def list_installed_games():
+def list_installed_games(refresh: bool = Query(False)):
     """
     Scans /Volumes/ROMS allocated folders and downloads table
     to return all downloaded and installed ROMs available on the local drive.
-    Caches results in memory for 30s to prevent disk-IO and SQLite lockups.
+    Caches results in memory for 30s unless refresh=true is passed.
     """
     now = time.time()
-    if now - _INSTALLED_CACHE["timestamp"] < 30.0 and _INSTALLED_CACHE["installed"]:
+    if not refresh and now - _INSTALLED_CACHE["timestamp"] < 30.0 and _INSTALLED_CACHE["installed"]:
         return {"installed": _INSTALLED_CACHE["installed"]}
 
     conn = get_db_connection()

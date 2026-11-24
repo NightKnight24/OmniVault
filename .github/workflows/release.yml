@@ -66,17 +66,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
-          name: OmniVault ${{ env.RELEASE_TAG }} — Multi-System Finder, Cloud Destinations & Exact-Game Scrapers
+          name: OmniVault ${{ env.RELEASE_TAG }} — 150+ System TheGamesDB Organizer, Cloud Sign-In & Zero-Disk Streaming
           generate_release_notes: true
           body: |
             ## OmniVault ${{ env.RELEASE_TAG }} (macOS Apple Silicon)
 
             ### Highlights
-            - **Direct Cloud Storage Downloads**: Save and extract ROMs & games straight to **iCloud Drive**, **Google Drive**, or **OneDrive** (zero-auth native sync mounts + Google Drive v3 / OneDrive Graph chunked REST API uploads).
-            - **Strict In-App Community Scrapers**: Clicking any configured community source scrapes & queues downloads **inside OmniVault** (never opening external browser redirects), backed by exact-game title, sequel-number, and non-file-hoster filtering.
-            - **39 Platforms + Zero-Quota Full Catalog Sync**: Supports classic arcade/consoles through **PS5**, **Nintendo Switch 2**, **Windows (PC)**, and **macOS**, with 1-click **Sync All Platforms** (`122k+` titles via TheGamesDB static CDN dump, zero API quota).
-            - **Real-Debrid 280+ Hoster Unlock & Live Health Monitor**: Token validation + dynamic hoster domain sync, Base/Update/DLC/Backport classification, and **Test All Sources**.
-            - **Inline Trailers & Gameplay + 1-at-a-Time Sequential Queue**: YouTube trailers & gameplay tabs in game details, sequential download queue (reorder/pause/resume/clear), `.chd`/`.rvz` compression, and `CRC32`/`SHA1`/`MD5` verification.
+            - **Full 150+ System TheGamesDB Catalog & Metadata Organizer**: Zero-quota **Resync Catalog** downloads all `130k+` titles across **150+ systems** (including **Switch 2**, **PS5**, **Xbox Series X/S**, **Xbox One**, **Windows**, **macOS**, **Amiga**, **3DO**, classic consoles & handhelds) with multi-category genres, **8,700+ developers**, **4,700+ publishers**, ESRB ratings, multiplayer/co-op counts, verified front box art, 1080p fanart backdrops, and screenshots — all filterable in `<15ms`.
+            - **Cloud Sign-In & Zero-Local-Disk Direct Streaming (`iCloud` • `Google Drive` • `OneDrive`)**: Connect via **1-click Desktop App / System Sign-In** or **OAuth 2.0 PKCE Browser "Sign in & Allow"**, streaming ROMs & Real-Debrid downloads directly through RAM into dedicated `OmniVault/ROMs/<Console>/` subfolders with **0 bytes written to the local drive** (plus optional iCloud offload after sync).
+            - **Instant Filtering & Anti-Cache Reliability**: Debounced abortable queries, `Cache-Control: no-store` protection for `WKWebView`, and 1-click **Refresh** & **Resync Catalog** controls right in the main Catalog toolbar.
+            - **Strict In-App Community Scrapers & Real-Debrid 280+ Hoster Unlock**: Exact-game title matching, inline YouTube trailers & gameplay, **Test All Sources**, and a 1-at-a-time sequential download queue.
           files: |
             ${{ env.ASSET_PATH }}
             ${{ env.SUMS_PATH }}

@@ -15,7 +15,8 @@ import {
   syncTheGamesDbPlatform, syncAllTheGamesDbPlatforms,
   fetchStorageConfig, saveStorageConfig, applyQuickSetup,
   browseDirectory, revealStorageFolder,
-  fetchCloudTargets, saveCloudTargets, testCloudTarget
+  fetchCloudTargets, saveCloudTargets, testCloudTarget,
+  startCloudOAuth, openCloudSystemSignIn
 } from '../services/api';
 import { playClick, playVictorySound } from '../utils/soundEffects';
 
@@ -23,6 +24,8 @@ const TGDB_SYNC_PLATFORMS = [
   { id: 'Switch2', label: 'Nintendo Switch 2' },
   { id: 'Switch', label: 'Nintendo Switch' },
   { id: 'PS5', label: 'PlayStation 5' },
+  { id: 'XboxSeriesX', label: 'Xbox Series X/S' },
+  { id: 'XboxOne', label: 'Xbox One' },
   { id: 'Windows', label: 'Windows (PC)' },
   { id: 'macOS', label: 'macOS' },
   { id: 'PS4', label: 'PlayStation 4' },
@@ -185,9 +188,10 @@ export default function UnifiedSettingsModal({
             custom_path: t.custom_path || '',
             prefer_api: Boolean(t.prefer_api),
             delete_local_after_upload: Boolean(t.delete_local_after_upload),
+            evict_local_after_sync: Boolean(t.evict_local_after_sync),
             access_token: '',
             refresh_token: '',
-            client_id: '',
+            client_id: t.client_id || '',
           };
         });
         setCloudEdits((prev) => ({ ...prev, ...nextEdits }));
@@ -346,6 +350,72 @@ export default function UnifiedSettingsModal({
     }
   };
 
+  const [oauthWaitingId, setOauthWaitingId] = useState(null);
+
+  useEffect(() => {
+    if (!isOpen || !oauthWaitingId) return undefined;
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetchCloudTargets();
+        if (!res) return;
+        setCloudConfig(res);
+        const target = (res.targets || []).find((t) => t.id === oauthWaitingId);
+        if (target && target.available) {
+          setOauthWaitingId(null);
+          playVictorySound();
+          showToast(`${target.name} signed in & connected!`);
+          if (onSourcesChanged) onSourcesChanged();
+        }
+      } catch {
+        // ignore poll error
+      }
+    }, 2200);
+    return () => clearInterval(poll);
+  }, [isOpen, oauthWaitingId, onSourcesChanged]);
+
+  const handleCloudSystemSignIn = async (pid) => {
+    playClick();
+    try {
+      const res = await openCloudSystemSignIn({ provider_id: pid });
+      setOauthWaitingId(pid);
+      setCloudTestResults((prev) => ({ ...prev, [pid]: { status: 'ok', message: res.message } }));
+      showToast(res.message || 'Opened cloud sign-in window...');
+    } catch (err) {
+      setCloudTestResults((prev) => ({ ...prev, [pid]: { status: 'error', message: err.message } }));
+    }
+  };
+
+  const handleCloudBrowserSignIn = async (pid, hasOAuthClient) => {
+    playClick();
+    const edit = cloudEdits[pid] || {};
+    if (!hasOAuthClient && !edit.client_id?.trim()) {
+      setExpandedCloudApi(pid);
+      setCloudTestResults((prev) => ({
+        ...prev,
+        [pid]: {
+          status: 'error',
+          message: 'Click "Sign in via Desktop App" for instant 0-key sign-in, or enter your free OAuth Client ID below to use Browser PKCE Sign-In.',
+        },
+      }));
+      return;
+    }
+    try {
+      const res = await startCloudOAuth({
+        provider_id: pid,
+        client_id: edit.client_id?.trim() || undefined,
+      });
+      setOauthWaitingId(pid);
+      setCloudTestResults((prev) => ({
+        ...prev,
+        [pid]: { status: 'ok', message: res.message || 'Browser opened — click Allow to finish connecting!' },
+      }));
+      showToast('Sign in & click Allow in your browser...');
+    } catch (err) {
+      setExpandedCloudApi(pid);
+      setCloudTestResults((prev) => ({ ...prev, [pid]: { status: 'error', message: err.message } }));
+    }
+  };
+
   const handleSaveCloudProvider = async (pid, clearToken = false) => {
     playClick();
     setSavingCloudId(pid);
@@ -356,12 +426,13 @@ export default function UnifiedSettingsModal({
         custom_path: edit.custom_path || '',
         prefer_api: Boolean(edit.prefer_api),
         delete_local_after_upload: Boolean(edit.delete_local_after_upload),
+        evict_local_after_sync: Boolean(edit.evict_local_after_sync),
+        client_id: edit.client_id?.trim() || '',
         clear_token: clearToken,
       };
       if (!clearToken) {
         if (edit.access_token?.trim()) payload.access_token = edit.access_token.trim();
         if (edit.refresh_token?.trim()) payload.refresh_token = edit.refresh_token.trim();
-        if (edit.client_id?.trim()) payload.client_id = edit.client_id.trim();
       }
       const res = await saveCloudTargets(payload);
       setCloudConfig({ default_target: res.default_target, targets: res.targets || [] });
@@ -371,7 +442,7 @@ export default function UnifiedSettingsModal({
       }));
       if (onSourcesChanged) onSourcesChanged();
       playVictorySound();
-      showToast(clearToken ? 'Cloud API token cleared.' : 'Cloud drive settings saved!');
+      showToast(clearToken ? 'Disconnected cloud account.' : 'Cloud drive settings saved!');
     } catch (err) {
       alert(`Failed to save cloud drive settings: ${err.message}`);
     } finally {
@@ -1085,7 +1156,7 @@ export default function UnifiedSettingsModal({
                           <span>Cloud Drive Destinations (iCloud Drive • Google Drive • OneDrive)</span>
                         </h4>
                         <p className="text-xs text-slate-300 mt-1">
-                          Download and extract ROMs straight to your synced cloud folders or upload via Google Drive / OneDrive REST APIs.
+                          Sign in &amp; allow your cloud drive to stream ROMs straight into dedicated <span className="font-mono text-sky-300">OmniVault/ROMs/&lt;Console&gt;/</span> folders — with zero-local-disk streaming in Direct Cloud mode.
                         </p>
                       </div>
                       <button
@@ -1108,6 +1179,7 @@ export default function UnifiedSettingsModal({
                         const testRes = cloudTestResults[t.id];
                         const isDefault = cloudConfig.default_target === t.id;
                         const isExpanded = expandedCloudApi === t.id;
+                        const isWaitingAuth = oauthWaitingId === t.id;
                         return (
                           <div
                             key={t.id}
@@ -1127,15 +1199,53 @@ export default function UnifiedSettingsModal({
                                     : 'bg-slate-800 text-slate-400 border-white/10'
                                 }`}>
                                   {t.available
-                                    ? (t.mode === 'api' ? 'Direct REST API' : `Local Sync Ready • ${t.free_gb || 0} GB Free`)
-                                    : 'Not Detected'}
+                                    ? (t.mode === 'api'
+                                      ? '✓ Signed In • 0 Local Disk Stream'
+                                      : `✓ Connected • ${t.free_gb || 0} GB Free`)
+                                    : (isWaitingAuth ? 'Waiting for Sign-In...' : 'Not Signed In')}
                                 </span>
+                                {t.zero_local_disk && (
+                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-700/60">
+                                    Zero Local Drive Usage
+                                  </span>
+                                )}
                                 {t.account && (
                                   <span className="text-[11px] font-mono text-slate-400">{t.account}</span>
                                 )}
                               </div>
 
                               <div className="flex items-center gap-1.5 flex-wrap">
+                                {t.id === 'icloud' ? (
+                                  !t.available && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCloudSystemSignIn('icloud')}
+                                      className="px-3 py-1 rounded-lg bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-400 hover:to-cyan-400 text-black text-[11px] font-black cursor-pointer"
+                                    >
+                                      Sign in to iCloud
+                                    </button>
+                                  )
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCloudSystemSignIn(t.id)}
+                                      className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold cursor-pointer"
+                                      title={`Sign in via official ${t.name} app (instant, zero keys)`}
+                                    >
+                                      {t.desktop_app_installed ? `Sign in (${t.short_name} App)` : `Connect ${t.short_name} App`}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCloudBrowserSignIn(t.id, Boolean(t.has_oauth_client_id || edit.client_id))}
+                                      className="px-2.5 py-1 rounded-lg bg-sky-500 hover:bg-sky-400 text-black text-[11px] font-black cursor-pointer"
+                                      title="Sign in & Allow in Browser (OAuth 2.0 PKCE — Direct 0-Disk Cloud Stream)"
+                                    >
+                                      {isWaitingAuth ? 'Waiting...' : 'Browser Sign-In'}
+                                    </button>
+                                  </>
+                                )}
+
                                 <button
                                   type="button"
                                   onClick={() => handleTestCloudTarget(t.id)}
@@ -1152,9 +1262,9 @@ export default function UnifiedSettingsModal({
                                   className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
                                 >
                                   <FolderOpen className="w-3 h-3" />
-                                  <span>Browse Folder...</span>
+                                  <span>Folder...</span>
                                 </button>
-                                {t.roms_path && (
+                                {t.roms_path && !String(t.roms_path).startsWith('Google Drive:') && !String(t.roms_path).startsWith('OneDrive:') && (
                                   <button
                                     type="button"
                                     onClick={() => revealStorageFolder('roms', t.roms_path)}
@@ -1177,23 +1287,27 @@ export default function UnifiedSettingsModal({
                                     {isDefault ? '✓ Default Target' : 'Set Default'}
                                   </button>
                                 )}
-                                {t.supports_api && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setExpandedCloudApi(isExpanded ? null : t.id)}
-                                    className="px-2.5 py-1 rounded-lg bg-violet-950/60 hover:bg-violet-900/60 text-violet-300 border border-violet-500/30 text-[11px] font-bold cursor-pointer"
-                                  >
-                                    {isExpanded ? 'Hide API Config' : 'API Token'}
-                                  </button>
-                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedCloudApi(isExpanded ? null : t.id)}
+                                  className="px-2.5 py-1 rounded-lg bg-violet-950/60 hover:bg-violet-900/60 text-violet-300 border border-violet-500/30 text-[11px] font-bold cursor-pointer"
+                                >
+                                  {isExpanded ? 'Hide Options' : 'Options'}
+                                </button>
                               </div>
                             </div>
 
-                            {(t.roms_path || t.mount_path) && (
-                              <div className="text-[11px] font-mono text-slate-400 bg-black/40 border border-white/5 rounded-lg px-3 py-1.5 truncate">
-                                Destination Path: <span className="text-slate-200">{t.roms_path || t.mount_path}</span>
-                              </div>
-                            )}
+                            <div className="text-[11px] font-mono text-slate-400 bg-black/40 border border-white/5 rounded-lg px-3 py-1.5 flex flex-wrap items-center justify-between gap-2">
+                              <span className="truncate">
+                                Console Folder Layout:{' '}
+                                <span className="text-slate-200">
+                                  {(t.roms_path || `${t.name}/OmniVault/ROMs`).replace(/\/+$/, '')}/&lt;Console&gt;/
+                                </span>
+                              </span>
+                              <span className="text-emerald-400 text-[10px]">
+                                Auto-sorted per console (SNES, PS5, Switch2, etc.)
+                              </span>
+                            </div>
 
                             {testRes && (
                               <div className={`p-2 rounded-xl text-xs font-semibold border ${
@@ -1205,84 +1319,112 @@ export default function UnifiedSettingsModal({
                               </div>
                             )}
 
-                            {t.supports_api && isExpanded && (
+                            {isExpanded && (
                               <div className="p-3.5 rounded-xl bg-black/40 border border-white/10 space-y-3">
-                                <div className="text-[11px] text-slate-300">
-                                  Optional REST API Upload (great if desktop sync isn&apos;t installed or inside Docker):
-                                  {t.has_api_token && (
-                                    <span className="ml-2 font-mono text-emerald-400">
-                                      Saved Token: {t.masked_token || 'Configured'}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                  <input
-                                    type="password"
-                                    value={edit.access_token || ''}
-                                    onChange={(e) => setCloudEdits((prev) => ({
-                                      ...prev,
-                                      [t.id]: { ...edit, access_token: e.target.value },
-                                    }))}
-                                    placeholder={`OAuth Access Token (${t.name})`}
-                                    className="px-3 py-2 rounded-xl bg-slate-950 border border-white/10 text-xs font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-sky-400"
-                                  />
-                                  <input
-                                    type="text"
-                                    value={edit.custom_path || ''}
-                                    onChange={(e) => setCloudEdits((prev) => ({
-                                      ...prev,
-                                      [t.id]: { ...edit, custom_path: e.target.value },
-                                    }))}
-                                    placeholder="Optional custom sync mount path override"
-                                    className="px-3 py-2 rounded-xl bg-slate-950 border border-white/10 text-xs font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-sky-400"
-                                  />
-                                </div>
-                                <div className="flex items-center justify-between flex-wrap gap-3 text-xs">
-                                  <div className="flex items-center gap-4 flex-wrap">
+                                {t.supports_oauth ? (
+                                  <>
+                                    <div className="text-[11px] text-slate-300 leading-relaxed">
+                                      <strong className="text-white">Browser OAuth 2.0 PKCE Sign-In (0 Local Disk Direct Cloud Stream):</strong>{' '}
+                                      Enter a free Desktop OAuth Client ID once (Google Cloud or Microsoft Entra public client — no secret required) and click{' '}
+                                      <strong className="text-sky-300">Browser Sign-In</strong> to sign in &amp; click Allow in your browser.
+                                      {t.has_api_token && (
+                                        <span className="ml-2 font-mono text-emerald-400">
+                                          • Active Session ({t.masked_token || 'Connected'})
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                      <input
+                                        type="text"
+                                        value={edit.client_id || ''}
+                                        onChange={(e) => setCloudEdits((prev) => ({
+                                          ...prev,
+                                          [t.id]: { ...edit, client_id: e.target.value },
+                                        }))}
+                                        placeholder={`${t.name} Desktop OAuth Client ID (for Browser Sign-In)`}
+                                        className="px-3 py-2 rounded-xl bg-slate-950 border border-white/10 text-xs font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-sky-400"
+                                      />
+                                      <input
+                                        type="text"
+                                        value={edit.custom_path || ''}
+                                        onChange={(e) => setCloudEdits((prev) => ({
+                                          ...prev,
+                                          [t.id]: { ...edit, custom_path: e.target.value },
+                                        }))}
+                                        placeholder="Optional custom local sync folder override"
+                                        className="px-3 py-2 rounded-xl bg-slate-950 border border-white/10 text-xs font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-sky-400"
+                                      />
+                                    </div>
+                                    <div className="flex items-center justify-between flex-wrap gap-3 text-xs">
+                                      <div className="flex items-center gap-4 flex-wrap">
+                                        <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                                          <input
+                                            type="checkbox"
+                                            checked={Boolean(edit.prefer_api)}
+                                            onChange={(e) => setCloudEdits((prev) => ({
+                                              ...prev,
+                                              [t.id]: { ...edit, prefer_api: e.target.checked },
+                                            }))}
+                                          />
+                                          <span>Direct Cloud Stream (0 bytes saved to local drive)</span>
+                                        </label>
+                                        <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                                          <input
+                                            type="checkbox"
+                                            checked={Boolean(edit.evict_local_after_sync)}
+                                            onChange={(e) => setCloudEdits((prev) => ({
+                                              ...prev,
+                                              [t.id]: { ...edit, evict_local_after_sync: e.target.checked },
+                                            }))}
+                                          />
+                                          <span>Offload local sync copy after cloud upload</span>
+                                        </label>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        {t.has_api_token && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleSaveCloudProvider(t.id, true)}
+                                            disabled={savingCloudId === t.id}
+                                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-rose-300 text-xs font-bold cursor-pointer"
+                                          >
+                                            Sign Out
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSaveCloudProvider(t.id, false)}
+                                          disabled={savingCloudId === t.id}
+                                          className="px-3.5 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-black text-xs font-black cursor-pointer"
+                                        >
+                                          {savingCloudId === t.id ? 'Saving...' : 'Save Options'}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div className="flex items-center justify-between flex-wrap gap-3 text-xs">
                                     <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
                                       <input
                                         type="checkbox"
-                                        checked={Boolean(edit.prefer_api)}
+                                        checked={Boolean(edit.evict_local_after_sync)}
                                         onChange={(e) => setCloudEdits((prev) => ({
                                           ...prev,
-                                          [t.id]: { ...edit, prefer_api: e.target.checked },
+                                          [t.id]: { ...edit, evict_local_after_sync: e.target.checked },
                                         }))}
                                       />
-                                      <span>Prefer REST API upload over local mount</span>
+                                      <span>Cloud-Only Mode: Offload local Mac copy after iCloud Drive finishes uploading</span>
                                     </label>
-                                    <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={Boolean(edit.delete_local_after_upload)}
-                                        onChange={(e) => setCloudEdits((prev) => ({
-                                          ...prev,
-                                          [t.id]: { ...edit, delete_local_after_upload: e.target.checked },
-                                        }))}
-                                      />
-                                      <span>Remove local staging copy after upload</span>
-                                    </label>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    {t.has_api_token && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleSaveCloudProvider(t.id, true)}
-                                        disabled={savingCloudId === t.id}
-                                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-rose-300 text-xs font-bold cursor-pointer"
-                                      >
-                                        Clear Token
-                                      </button>
-                                    )}
                                     <button
                                       type="button"
                                       onClick={() => handleSaveCloudProvider(t.id, false)}
                                       disabled={savingCloudId === t.id}
                                       className="px-3.5 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-black text-xs font-black cursor-pointer"
                                     >
-                                      {savingCloudId === t.id ? 'Saving...' : 'Save Cloud Config'}
+                                      {savingCloudId === t.id ? 'Saving...' : 'Save Options'}
                                     </button>
                                   </div>
-                                </div>
+                                )}
                               </div>
                             )}
                           </div>

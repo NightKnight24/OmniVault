@@ -714,22 +714,46 @@ export default function GameDetailModal({
                 {/* Title & Badges */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-white/10">
                   <div>
-                    <div className="flex items-center gap-2.5 mb-2 flex-wrap">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
                       <span className="px-2.5 py-0.5 rounded-md bg-cyan-900/50 text-cyan-300 border border-cyan-500/40 text-xs font-bold uppercase tracking-wider">
-                        {game.platform}
+                        {game.platform_name || game.platform}
                       </span>
                       {game.release_year ? (
                         <span className="text-xs text-slate-400 font-medium flex items-center gap-1">
                           <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                          {game.release_year}
+                          {game.release_date || game.release_year}
                         </span>
                       ) : null}
-                      {(game.developer || game.publisher) && (
-                        <span className="text-xs text-slate-400 font-medium flex items-center gap-1">
-                          <Building className="w-3.5 h-3.5 text-slate-500" />
-                          {game.developer || game.publisher}
+                      {game.developer && (
+                        <span className="text-xs text-slate-300 font-medium flex items-center gap-1">
+                          <Building className="w-3.5 h-3.5 text-cyan-400" />
+                          {game.developer}
                         </span>
                       )}
+                      {game.publisher && game.publisher !== game.developer && (
+                        <span className="text-xs text-slate-400 font-medium">
+                          • Pub: {game.publisher}
+                        </span>
+                      )}
+                      {game.esrb_rating && (
+                        <span className="px-2 py-0.5 rounded bg-amber-950/70 border border-amber-500/30 text-amber-300 text-[10px] font-mono font-bold">
+                          {game.esrb_rating}
+                        </span>
+                      )}
+                      {game.players > 0 && (
+                        <span className="px-2 py-0.5 rounded bg-emerald-950/70 border border-emerald-500/30 text-emerald-300 text-[10px] font-mono font-bold">
+                          {game.players === 1 ? '1 Player' : `1–${game.players} Players`}
+                          {game.coop === 'Yes' ? ' • Co-op' : ''}
+                        </span>
+                      )}
+                      {(game.genres && game.genres.length > 0 ? game.genres : (game.genre ? [game.genre] : [])).map((gTag) => (
+                        <span
+                          key={gTag}
+                          className="px-2 py-0.5 rounded bg-violet-950/70 border border-violet-500/30 text-violet-300 text-[10px] font-semibold"
+                        >
+                          {gTag}
+                        </span>
+                      ))}
                     </div>
 
                     <div className="flex items-center gap-3">
@@ -835,15 +859,17 @@ export default function GameDetailModal({
                   </div>
                 )}
 
-                {/* Completed Local File Banner */}
+                {/* Completed File Banner */}
                 {isCompleted && (
                   <div className="my-6 p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-3 text-emerald-300 text-sm font-semibold min-w-0">
                       <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
                       <div className="min-w-0">
-                        <div className="font-bold">ROM Saved on Local Drive</div>
+                        <div className="font-bold">
+                          ROM Saved on {downloadState?.destination_label || (resolvedLocalPath.includes('CloudDocs') ? 'iCloud Drive' : resolvedLocalPath.includes('GoogleDrive') ? 'Google Drive' : resolvedLocalPath.includes('OneDrive') ? 'OneDrive' : 'Local Drive')}
+                        </div>
                         <div className="text-xs text-emerald-400/80 font-mono truncate">
-                          {resolvedLocalPath || `/Volumes/ROMS/${game.platform}/`}
+                          {resolvedLocalPath || `OmniVault/ROMs/${game.platform}/`}
                         </div>
                       </div>
                     </div>

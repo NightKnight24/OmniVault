@@ -5,11 +5,12 @@ import urllib.parse
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, Body
 from typing import Optional, List, Dict, Any
-from ..database import get_db_connection, row_to_game_dict
+from ..database import ensure_games_extended_columns, get_db_connection, row_to_game_dict
 from ..scrapers.providers.manager import get_all_providers
 from ..services.mirror_resolver import mirror_resolver, list_mirror_sources
 from ..services.realdebrid_service import get_supported_hoster_domains, is_realdebrid_active
 from ..services.thegamesdb_service import (
+    TGDB_PLATFORM_DISPLAY_NAMES,
     enrich_game_by_id,
     is_thegamesdb_active,
     lookup_game_thegamesdb,
@@ -21,47 +22,89 @@ CONSOLE_FAMILIES = {
         "id": "playstation",
         "name": "PlayStation",
         "badge": "SONY",
-        "platforms": ["PS1", "PS2", "PS3", "PS4", "PS5", "PSP", "PSVita"]
+        "platforms": ["PS5", "PS4", "PS3", "PS2", "PS1", "PSP", "PSVita"],
     },
     "nintendo_home": {
         "id": "nintendo_home",
         "name": "Nintendo Home",
         "badge": "NIN-HOME",
-        "platforms": ["NES", "SNES", "N64", "GameCube", "Wii", "WiiU", "Switch", "Switch2"]
+        "platforms": ["Switch2", "Switch", "WiiU", "Wii", "GameCube", "N64", "SNES", "NES", "FDS"],
     },
     "nintendo_handheld": {
         "id": "nintendo_handheld",
         "name": "Nintendo Handheld",
         "badge": "NIN-PORTABLE",
-        "platforms": ["GB", "GBC", "GBA", "NDS", "3DS"]
+        "platforms": ["3DS", "NDS", "GBA", "GBC", "GB", "VirtualBoy", "GameAndWatch", "PokemonMini"],
     },
     "xbox": {
         "id": "xbox",
         "name": "Xbox",
         "badge": "MS",
-        "platforms": ["Xbox", "Xbox360"]
+        "platforms": ["XboxSeriesX", "XboxOne", "Xbox360", "Xbox"],
     },
     "pc_desktop": {
         "id": "pc_desktop",
         "name": "PC & Mac",
         "badge": "PC / MAC",
-        "platforms": ["Windows", "macOS"]
+        "platforms": ["Windows", "macOS"],
     },
     "sega": {
         "id": "sega",
         "name": "Sega",
         "badge": "SEGA",
-        "platforms": ["MasterSystem", "Genesis", "SegaCD", "Saturn", "Dreamcast", "GameGear"]
+        "platforms": ["Dreamcast", "Saturn", "SegaCD", "Sega32X", "Genesis", "MasterSystem", "GameGear", "SG1000", "SegaPico"],
     },
     "arcade_retro": {
         "id": "arcade_retro",
         "name": "Arcade & Retro",
         "badge": "RETRO",
-        "platforms": ["Arcade", "NeoGeo", "TG16", "Atari2600", "Atari5200", "Atari7800", "C64", "WonderSwan", "WonderSwanColor"]
-    }
+        "platforms": [
+            "Arcade", "NeoGeo", "NeoGeoCD", "NGP", "NGPC",
+            "TG16", "TGCD", "PCFX", "3DO",
+            "Jaguar", "JaguarCD", "Lynx",
+            "Atari2600", "Atari5200", "Atari7800",
+            "ColecoVision", "Intellivision", "Vectrex", "CDi",
+            "WonderSwan", "WonderSwanColor", "Playdate", "Evercade",
+        ],
+    },
+    "computers_mobile": {
+        "id": "computers_mobile",
+        "name": "Computers & Mobile",
+        "badge": "COMP / MOB",
+        "platforms": [
+            "C64", "Amiga", "AmigaCD32", "ZXSpectrum", "AmstradCPC",
+            "MSX", "AtariST", "Atari800", "AppleII", "PC98", "PC88",
+            "X68000", "FMTowns", "Android", "iOS", "OculusQuest",
+        ],
+    },
 }
 
+_STATIC_ASSIGNED_PLATFORMS = {
+    p.lower()
+    for fam_id, fam in CONSOLE_FAMILIES.items()
+    if fam_id != "computers_mobile"
+    for p in fam["platforms"]
+}
+
+
+def _resolve_family_platforms(cursor, fam_id: str) -> List[str]:
+    fid = (fam_id or "").strip().lower()
+    if fid not in CONSOLE_FAMILIES:
+        return []
+    if fid != "computers_mobile":
+        return list(CONSOLE_FAMILIES[fid]["platforms"])
+    base = list(CONSOLE_FAMILIES["computers_mobile"]["platforms"])
+    seen = {p.lower() for p in base}
+    cursor.execute("SELECT DISTINCT platform FROM games")
+    for (plat,) in cursor.fetchall():
+        if plat and plat.lower() not in _STATIC_ASSIGNED_PLATFORMS and plat.lower() not in seen:
+            base.append(plat)
+            seen.add(plat.lower())
+    return base
+
+
 router = APIRouter(prefix="/api/games", tags=["games"])
+
 
 @router.get("/meta/families")
 def get_console_families():
@@ -73,185 +116,366 @@ def get_console_families():
     GROUP BY platform
     """)
     plat_counts = {r["platform"]: r["game_count"] for r in cursor.fetchall()}
-    conn.close()
 
     families_out = []
     for fam_id, fam in CONSOLE_FAMILIES.items():
-        total_games = sum(plat_counts.get(p, 0) for p in fam["platforms"])
+        fam_plats = _resolve_family_platforms(cursor, fam_id)
+        total_games = sum(plat_counts.get(p, 0) for p in fam_plats)
         families_out.append({
             "id": fam_id,
             "name": fam["name"],
             "badge": fam["badge"],
-            "platforms": fam["platforms"],
-            "total_games": total_games
+            "platforms": fam_plats,
+            "total_games": total_games,
         })
+    conn.close()
     return families_out
+
 
 @router.get("/meta/platforms")
 def get_platforms():
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-    SELECT platform, platform_name, COUNT(*) as game_count
+    SELECT platform, MAX(platform_name) as platform_name, COUNT(*) as game_count
     FROM games
     GROUP BY platform
     ORDER BY game_count DESC
     """)
     rows = cursor.fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+
+    plat_to_fam = {}
+    for fam_id, fam in CONSOLE_FAMILIES.items():
+        for p in fam["platforms"]:
+            plat_to_fam[p.lower()] = fam_id
+
+    out = []
+    for r in rows:
+        code = r["platform"]
+        if not code:
+            continue
+        fam_id = plat_to_fam.get(code.lower(), "computers_mobile")
+        out.append({
+            "platform": code,
+            "platform_name": TGDB_PLATFORM_DISPLAY_NAMES.get(code) or r["platform_name"] or code,
+            "game_count": r["game_count"],
+            "family": fam_id,
+        })
+    return out
+
+
+def _build_scope_where(cursor, platform: Optional[str], family: Optional[str], alias: str = "") -> tuple:
+    prefix = f"{alias}." if alias else ""
+    if platform and isinstance(platform, str) and platform.upper() != "ALL":
+        return f" AND LOWER({prefix}platform) = LOWER(?)", [platform.strip()]
+    if family and isinstance(family, str) and family.lower() in CONSOLE_FAMILIES:
+        fam_plats = _resolve_family_platforms(cursor, family.lower())
+        if fam_plats:
+            placeholders = ",".join(["?"] * len(fam_plats))
+            return f" AND {prefix}platform IN ({placeholders})", fam_plats
+    return "", []
+
 
 @router.get("/meta/genres")
 def get_genres(platform: Optional[str] = Query(None), family: Optional[str] = Query(None)):
+    ensure_games_extended_columns()
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    if platform and platform.upper() != "ALL":
-        cursor.execute("""
-        SELECT genre, COUNT(*) as cnt
+    scope_sql, scope_params = _build_scope_where(cursor, platform, family)
+    cursor.execute(
+        f"""
+        SELECT genre, genres_list, COUNT(*) as cnt
         FROM games
-        WHERE platform = ? AND genre IS NOT NULL
-        GROUP BY genre
-        ORDER BY cnt DESC
-        """, (platform,))
-    elif family and family.lower() in CONSOLE_FAMILIES:
-        fam_plats = CONSOLE_FAMILIES[family.lower()]["platforms"]
-        placeholders = ",".join(["?"] * len(fam_plats))
-        cursor.execute(f"""
-        SELECT genre, COUNT(*) as cnt
-        FROM games
-        WHERE platform IN ({placeholders}) AND genre IS NOT NULL
-        GROUP BY genre
-        ORDER BY cnt DESC
-        """, fam_plats)
-    else:
-        cursor.execute("""
-        SELECT genre, COUNT(*) as cnt
-        FROM games
-        WHERE genre IS NOT NULL
-        GROUP BY genre
-        ORDER BY cnt DESC
-        """)
-    rows = cursor.fetchall()
+        WHERE 1=1 {scope_sql}
+        GROUP BY genre, genres_list
+        """,
+        scope_params,
+    )
+    counts: Dict[str, int] = {}
+    for row in cursor.fetchall():
+        c = int(row["cnt"] or 0)
+        glist = str(row["genres_list"] or "").strip()
+        if glist:
+            tags = {t.strip() for t in glist.split("|") if t.strip()}
+        elif row["genre"]:
+            tags = {str(row["genre"]).strip()}
+        else:
+            tags = set()
+        for t in tags:
+            if t and t != "Uncategorized":
+                counts[t] = counts.get(t, 0) + c
     conn.close()
-    return [{"name": r["genre"], "count": r["cnt"]} for r in rows if r["genre"]]
+    sorted_genres = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [{"name": name, "count": cnt} for name, cnt in sorted_genres if cnt > 0]
+
+
+@router.get("/meta/filters")
+def get_catalog_filters(platform: Optional[str] = Query(None), family: Optional[str] = Query(None)):
+    """Returns rich TheGamesDB metadata filter facets (developers, publishers, ESRB ratings, decades, multiplayer)."""
+    ensure_games_extended_columns()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    scope_sql, scope_params = _build_scope_where(cursor, platform, family)
+
+    cursor.execute(
+        f"""
+        SELECT developer, COUNT(*) as cnt
+        FROM games
+        WHERE developer IS NOT NULL AND TRIM(developer) != '' AND developer != 'Unknown' {scope_sql}
+        GROUP BY developer
+        ORDER BY cnt DESC, developer ASC
+        LIMIT 120
+        """,
+        scope_params,
+    )
+    developers = [{"name": r["developer"], "count": r["cnt"]} for r in cursor.fetchall()]
+
+    cursor.execute(
+        f"""
+        SELECT publisher, COUNT(*) as cnt
+        FROM games
+        WHERE publisher IS NOT NULL AND TRIM(publisher) != '' AND publisher != 'Unknown' {scope_sql}
+        GROUP BY publisher
+        ORDER BY cnt DESC, publisher ASC
+        LIMIT 120
+        """,
+        scope_params,
+    )
+    publishers = [{"name": r["publisher"], "count": r["cnt"]} for r in cursor.fetchall()]
+
+    cursor.execute(
+        f"""
+        SELECT esrb_rating, COUNT(*) as cnt
+        FROM games
+        WHERE esrb_rating IS NOT NULL AND TRIM(esrb_rating) != '' {scope_sql}
+        GROUP BY esrb_rating
+        ORDER BY cnt DESC
+        """,
+        scope_params,
+    )
+    esrb_ratings = [{"name": r["esrb_rating"], "count": r["cnt"]} for r in cursor.fetchall()]
+
+    cursor.execute(
+        f"""
+        SELECT (release_year / 10) * 10 as decade, COUNT(*) as cnt
+        FROM games
+        WHERE release_year IS NOT NULL AND release_year >= 1970 AND release_year <= 2035 {scope_sql}
+        GROUP BY decade
+        ORDER BY decade DESC
+        """,
+        scope_params,
+    )
+    decades = [{"decade": int(r["decade"]), "label": f"{int(r['decade'])}s", "count": r["cnt"]} for r in cursor.fetchall() if r["decade"]]
+
+    cursor.execute(
+        f"SELECT COUNT(*) FROM games WHERE coop = 'Yes' {scope_sql}",
+        scope_params,
+    )
+    coop_count = int(cursor.fetchone()[0] or 0)
+
+    conn.close()
+    return {
+        "developers": developers,
+        "publishers": publishers,
+        "esrb_ratings": esrb_ratings,
+        "decades": decades,
+        "coop_count": coop_count,
+    }
+
+
+def _append_game_filters(
+    cursor,
+    platform: Optional[str],
+    family: Optional[str],
+    genre: Optional[str],
+    developer: Optional[str],
+    publisher: Optional[str],
+    esrb: Optional[str],
+    players: Optional[str],
+    coop: Optional[bool],
+    decade: Optional[int],
+    year: Optional[int],
+    search: Optional[str],
+    featured_only: Optional[bool],
+    favorites_only: Optional[bool],
+) -> tuple:
+    clauses: List[str] = []
+    params: List[Any] = []
+
+    scope_sql, scope_params = _build_scope_where(cursor, platform, family, alias="g")
+    if scope_sql:
+        clauses.append(scope_sql[5:])
+        params.extend(scope_params)
+
+    if genre and isinstance(genre, str) and genre.upper() != "ALL":
+        g_clean = genre.strip()
+        if g_clean.lower() == "survival horror":
+            clauses.append("(g.genre IN ('Survival Horror', 'Horror') OR g.genres_list LIKE '%|Horror|%' OR g.genres_list LIKE '%|Survival Horror|%')")
+        else:
+            clauses.append("(LOWER(g.genre) = LOWER(?) OR LOWER(g.genres_list) LIKE LOWER(?))")
+            params.extend([g_clean, f"%|{g_clean}|%"])
+
+    if developer and isinstance(developer, str) and developer.upper() != "ALL":
+        d_clean = developer.strip()
+        clauses.append("(LOWER(g.developer) = LOWER(?) OR LOWER(g.developer) LIKE LOWER(?))")
+        params.extend([d_clean, f"%{d_clean}%"])
+
+    if publisher and isinstance(publisher, str) and publisher.upper() != "ALL":
+        p_clean = publisher.strip()
+        clauses.append("(LOWER(g.publisher) = LOWER(?) OR LOWER(g.publisher) LIKE LOWER(?))")
+        params.extend([p_clean, f"%{p_clean}%"])
+
+    if esrb and isinstance(esrb, str) and esrb.upper() != "ALL":
+        clauses.append("LOWER(g.esrb_rating) = LOWER(?)")
+        params.append(esrb.strip())
+
+    if players and isinstance(players, str) and players.upper() != "ALL":
+        pl = players.strip().lower()
+        if pl == "1":
+            clauses.append("g.players = 1")
+        elif pl in ("2+", "multiplayer"):
+            clauses.append("g.players >= 2")
+        elif pl == "4+":
+            clauses.append("g.players >= 4")
+        elif pl == "coop":
+            clauses.append("g.coop = 'Yes'")
+
+    if isinstance(coop, bool) and coop:
+        clauses.append("g.coop = 'Yes'")
+
+    if isinstance(decade, int) and decade >= 1970:
+        clauses.append("g.release_year >= ? AND g.release_year <= ?")
+        params.extend([decade, decade + 9])
+
+    if isinstance(year, int) and year >= 1970:
+        clauses.append("g.release_year = ?")
+        params.append(year)
+
+    if search and isinstance(search, str) and search.strip():
+        q = search.strip()
+        like_q = f"%{q}%"
+        clauses.append(
+            "(g.title LIKE ? OR g.alternates LIKE ? OR g.developer LIKE ? OR g.publisher LIKE ? OR g.description LIKE ?)"
+        )
+        params.extend([like_q, like_q, like_q, like_q, like_q])
+
+    if isinstance(featured_only, bool) and featured_only:
+        clauses.append("g.is_featured = 1")
+
+    if isinstance(favorites_only, bool) and favorites_only:
+        clauses.append("f.game_id IS NOT NULL")
+
+    if not clauses:
+        return "", []
+    return " AND " + " AND ".join(clauses), params
+
 
 @router.get("")
 def list_games(
     platform: Optional[str] = None,
     family: Optional[str] = None,
     genre: Optional[str] = None,
+    developer: Optional[str] = None,
+    publisher: Optional[str] = None,
+    esrb: Optional[str] = None,
+    players: Optional[str] = None,
+    coop: Optional[bool] = False,
+    decade: Optional[int] = None,
+    year: Optional[int] = None,
     search: Optional[str] = None,
     sort: Optional[str] = "rating_desc",
     featured_only: Optional[bool] = False,
     favorites_only: Optional[bool] = False,
     page: int = 1,
-    page_size: int = 24
+    page_size: int = 24,
 ):
+    ensure_games_extended_columns()
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    query = """
-    SELECT g.*, 
+
+    where_sql, filter_params = _append_game_filters(
+        cursor=cursor,
+        platform=platform,
+        family=family,
+        genre=genre,
+        developer=developer,
+        publisher=publisher,
+        esrb=esrb,
+        players=players,
+        coop=coop,
+        decade=decade,
+        year=year,
+        search=search,
+        featured_only=featured_only,
+        favorites_only=favorites_only,
+    )
+
+    query = f"""
+    SELECT g.*,
            CASE WHEN f.game_id IS NOT NULL THEN 1 ELSE 0 END as is_favorite,
            ur.rating as user_rating
     FROM games g
     LEFT JOIN favorites f ON g.id = f.game_id
     LEFT JOIN user_ratings ur ON g.id = ur.game_id
-    WHERE 1=1
+    WHERE 1=1{where_sql}
     """
-    params = []
-    
-    # Platform / Family filter
-    if platform and isinstance(platform, str) and platform.upper() != "ALL":
-        query += " AND g.platform = ?"
-        params.append(platform)
-    elif family and isinstance(family, str) and family.lower() in CONSOLE_FAMILIES:
-        fam_plats = CONSOLE_FAMILIES[family.lower()]["platforms"]
-        placeholders = ",".join(["?"] * len(fam_plats))
-        query += f" AND g.platform IN ({placeholders})"
-        params.extend(fam_plats)
-        
-    if genre and isinstance(genre, str) and genre.upper() != "ALL":
-        query += " AND g.genre = ?"
-        params.append(genre)
-        
-    if search and isinstance(search, str):
-        query += " AND (g.title LIKE ? OR g.description LIKE ?)"
-        params.extend([f"%{search}%", f"%{search}%"])
-        
-    if isinstance(featured_only, bool) and featured_only:
-        query += " AND g.is_featured = 1"
+    params = list(filter_params)
 
-    if isinstance(favorites_only, bool) and favorites_only:
-        query += " AND f.game_id IS NOT NULL"
-        
-    # Sort options: Real Ratings, Popularity, Title, Size, Release Year
+    order_prefix = ""
+    if search and isinstance(search, str) and search.strip():
+        sq = search.strip()
+        order_prefix = "CASE WHEN LOWER(g.title) = LOWER(?) THEN 0 WHEN LOWER(g.title) LIKE LOWER(?) THEN 1 ELSE 2 END ASC, "
+        params.extend([sq, f"{sq}%"])
+
     if sort == "rating_desc":
-        query += " ORDER BY g.rating DESC, g.rating_count DESC, g.title ASC"
+        order_clause = "g.rating DESC, g.rating_count DESC, g.title ASC"
     elif sort == "popularity_desc":
-        query += " ORDER BY g.rating_count DESC, g.rating DESC, g.title ASC"
+        order_clause = "g.rating_count DESC, g.rating DESC, g.title ASC"
     elif sort == "title_asc":
-        query += " ORDER BY g.title ASC"
+        order_clause = "g.title ASC"
     elif sort == "title_desc":
-        query += " ORDER BY g.title DESC"
+        order_clause = "g.title DESC"
+    elif sort == "developer_asc":
+        order_clause = "CASE WHEN g.developer IS NULL OR g.developer = '' THEN 1 ELSE 0 END ASC, g.developer ASC, g.title ASC"
     elif sort == "size_desc":
-        query += " ORDER BY g.file_size_mb DESC, g.title ASC"
+        order_clause = "g.file_size_mb DESC, g.title ASC"
     elif sort == "size_asc":
-        query += " ORDER BY g.file_size_mb ASC, g.title ASC"
+        order_clause = "g.file_size_mb ASC, g.title ASC"
     elif sort == "year_desc":
-        query += " ORDER BY g.release_year DESC, g.title ASC"
+        order_clause = "CASE WHEN g.release_year IS NULL OR g.release_year = 0 THEN 1 ELSE 0 END ASC, g.release_year DESC, g.title ASC"
     elif sort == "year_asc":
-        query += " ORDER BY g.release_year ASC, g.title ASC"
+        order_clause = "CASE WHEN g.release_year IS NULL OR g.release_year = 0 THEN 1 ELSE 0 END ASC, g.release_year ASC, g.title ASC"
     else:
-        query += " ORDER BY g.id ASC"
-        
-    offset = (page - 1) * page_size
-    query += " LIMIT ? OFFSET ?"
-    params.extend([page_size, offset])
-    
+        order_clause = "g.id ASC"
+
+    safe_page = max(1, int(page or 1))
+    safe_size = max(1, min(120, int(page_size or 24)))
+    offset = (safe_page - 1) * safe_size
+    query += f" ORDER BY {order_prefix}{order_clause} LIMIT ? OFFSET ?"
+    params.extend([safe_size, offset])
+
     cursor.execute(query, params)
     rows = cursor.fetchall()
     games = [row_to_game_dict(r) for r in rows]
-    
-    count_query = """
-    SELECT COUNT(*) 
+
+    count_query = f"""
+    SELECT COUNT(*)
     FROM games g
     LEFT JOIN favorites f ON g.id = f.game_id
-    WHERE 1=1
+    WHERE 1=1{where_sql}
     """
-    count_params = []
-    if platform and isinstance(platform, str) and platform.upper() != "ALL":
-        count_query += " AND g.platform = ?"
-        count_params.append(platform)
-    elif family and isinstance(family, str) and family.lower() in CONSOLE_FAMILIES:
-        fam_plats = CONSOLE_FAMILIES[family.lower()]["platforms"]
-        placeholders = ",".join(["?"] * len(fam_plats))
-        count_query += f" AND g.platform IN ({placeholders})"
-        count_params.extend(fam_plats)
-        
-    if genre and isinstance(genre, str) and genre.upper() != "ALL":
-        count_query += " AND g.genre = ?"
-        count_params.append(genre)
-    if search and isinstance(search, str):
-        count_query += " AND (g.title LIKE ? OR g.description LIKE ?)"
-        count_params.extend([f"%{search}%", f"%{search}%"])
-    if isinstance(featured_only, bool) and featured_only:
-        count_query += " AND g.is_featured = 1"
-    if isinstance(favorites_only, bool) and favorites_only:
-        count_query += " AND f.game_id IS NOT NULL"
-        
-    cursor.execute(count_query, count_params)
+    cursor.execute(count_query, filter_params)
     total_count = cursor.fetchone()[0]
-    total_pages = max(1, math.ceil(total_count / page_size))
-    
+    total_pages = max(1, math.ceil(total_count / safe_size))
+
     conn.close()
     return {
         "total": total_count,
-        "page": page,
-        "page_size": page_size,
+        "page": safe_page,
+        "page_size": safe_size,
         "total_pages": total_pages,
-        "games": games
+        "games": games,
     }
 
 @router.get("/meta/favorites-count")

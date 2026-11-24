@@ -19,10 +19,12 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 # 1. Build & copy frontend into Resources
 echo "-> Building & Packaging Frontend Assets & Brand Icon..."
-if [ ! -d "$SOURCE_DIR/frontend/node_modules" ]; then
-    (cd "$SOURCE_DIR/frontend" && npm ci)
+if [ "${SKIP_FRONTEND_BUILD:-0}" != "1" ] || [ ! -d "$SOURCE_DIR/frontend/dist" ]; then
+    if [ ! -d "$SOURCE_DIR/frontend/node_modules" ]; then
+        (cd "$SOURCE_DIR/frontend" && npm ci)
+    fi
+    (cd "$SOURCE_DIR/frontend" && npm run build)
 fi
-(cd "$SOURCE_DIR/frontend" && npm run build)
 mkdir -p "$RESOURCES_DIR/frontend"
 rm -rf "$RESOURCES_DIR/frontend/dist"
 cp -R "$SOURCE_DIR/frontend/dist" "$RESOURCES_DIR/frontend/dist"
@@ -124,9 +126,9 @@ cat << 'EOF' > "$CONTENTS_DIR/Info.plist"
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0.0</string>
+    <string>2.1.0</string>
     <key>CFBundleVersion</key>
-    <string>5</string>
+    <string>6</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>

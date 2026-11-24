@@ -512,6 +512,74 @@ async def download_file_worker(
                     temp_path = dest_path.with_suffix(dest_path.suffix + ".part")
                 print(f"[Real-Debrid] Unrestricted hoster link -> {dest_path.name}")
 
+        # ZERO-LOCAL-DISK DIRECT RAM-TO-CLOUD STREAMING (Google Drive / OneDrive API Mode)
+        if dest_meta and dest_meta.get("mode") == "api":
+            from .cloud_storage_service import stream_url_to_cloud_api
+
+            target_label = dest_meta.get("target_label") or "Cloud Drive"
+            last_emit = 0.0
+
+            def _on_stream_progress(sent: int, total: int, speed_mbps: float) -> None:
+                nonlocal last_emit
+                now_m = time.monotonic()
+                if now_m - last_emit < 0.35 and sent < total:
+                    return
+                last_emit = now_m
+                pct = min(99.9, round((sent / max(total, 1)) * 100.0, 1))
+                rem_b = max(0, total - sent)
+                eta_s = int(rem_b / max(speed_mbps * 1024 * 1024, 1)) if speed_mbps > 0 else 0
+                eta_txt = f"{eta_s}s" if eta_s < 60 else f"{eta_s // 60}m {eta_s % 60}s"
+                st = {
+                    "status": "downloading",
+                    "progress": pct,
+                    "downloaded_bytes": sent,
+                    "total_bytes": total,
+                    "speed": f"☁️ {speed_mbps:.1f} MB/s",
+                    "eta": f"Direct → {target_label} ({eta_txt})",
+                }
+                if download_id in DOWNLOAD_STATES:
+                    DOWNLOAD_STATES[download_id].update(st)
+                update_db_download(download_id, st)
+
+            init_cloud = {
+                "status": "downloading",
+                "progress": 0.0,
+                "speed": f"☁️ Streaming → {target_label}...",
+                "eta": "0 Local Disk...",
+                "downloaded_bytes": 0,
+                "total_bytes": 0,
+            }
+            if download_id in DOWNLOAD_STATES:
+                DOWNLOAD_STATES[download_id].update(init_cloud)
+            update_db_download(download_id, init_cloud)
+
+            stream_res = await stream_url_to_cloud_api(
+                provider_id=dest_meta["target_id"],
+                source_url=url,
+                request_headers=get_download_headers(url),
+                fallback_filename=dest_path.name,
+                platform=platform,
+                progress_cb=_on_stream_progress,
+                is_paused_cb=lambda: bool(download_id in DOWNLOAD_STATES and DOWNLOAD_STATES[download_id].get("status") == "paused"),
+            )
+            if stream_res.get("status") == "paused":
+                return
+
+            done_state = {
+                "status": "completed",
+                "progress": 100.0,
+                "downloaded_bytes": stream_res.get("total_bytes", 0),
+                "total_bytes": stream_res.get("total_bytes", 0),
+                "speed": "0 MB/s",
+                "eta": f"Streamed to {target_label} (0 Local Disk)",
+                "filename": stream_res.get("filename") or dest_path.name,
+                "destination_path": stream_res.get("remote_path") or f"{target_label}:/OmniVault/ROMs/{platform}/{dest_path.name}",
+            }
+            if download_id in DOWNLOAD_STATES:
+                DOWNLOAD_STATES[download_id].update(done_state)
+            update_db_download(download_id, done_state)
+            return
+
         dest_path.parent.mkdir(parents=True, exist_ok=True)
 
         state = {
@@ -600,6 +668,9 @@ async def download_file_worker(
                     # Auto-extract and resolve primary playable ROM path
                     final_rom_path = extract_and_resolve_rom_file(dest_path, game_title, platform)
                     stored_dest = await _finalize_cloud_api_upload_if_needed(download_id, final_rom_path, platform, dest_meta)
+                    if dest_meta and dest_meta.get("mode") == "mount" and dest_meta.get("evict_local_after_sync"):
+                        from .cloud_storage_service import schedule_cloud_mount_eviction
+                        schedule_cloud_mount_eviction(final_rom_path)
                     eta_label = (
                         f"Saved to {dest_meta['target_label']}"
                         if (dest_meta and dest_meta.get("target_id") != "local")

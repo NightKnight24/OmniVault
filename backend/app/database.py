@@ -90,11 +90,7 @@ def init_db():
     """)
 
     # Indices for high performance queries across tens of thousands of ROMs
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_platform ON games(platform);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_genre ON games(genre);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_rating ON games(rating DESC);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_title ON games(title);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_featured ON games(is_featured);")
+    ensure_games_extended_columns(conn)
     
     # Downloads table
     cursor.execute("""
@@ -261,6 +257,40 @@ def init_db():
     conn.close()
 
 
+def ensure_games_extended_columns(conn: Optional[sqlite3.Connection] = None) -> None:
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cols = {r[1] for r in cursor.execute("PRAGMA table_info(games)").fetchall()}
+        migrations = [
+            ("genres_list", "TEXT DEFAULT ''"),
+            ("esrb_rating", "TEXT DEFAULT ''"),
+            ("players", "INTEGER DEFAULT 0"),
+            ("coop", "TEXT DEFAULT ''"),
+            ("release_date", "TEXT DEFAULT ''"),
+            ("alternates", "TEXT DEFAULT ''"),
+        ]
+        for col_name, col_def in migrations:
+            if col_name not in cols:
+                cursor.execute(f"ALTER TABLE games ADD COLUMN {col_name} {col_def}")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_platform ON games(platform);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_genre ON games(genre);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_rating ON games(rating DESC, rating_count DESC);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_title ON games(title);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_featured ON games(is_featured);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_year ON games(release_year DESC);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_developer ON games(developer);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_publisher ON games(publisher);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_esrb ON games(esrb_rating);")
+        if own_conn:
+            conn.commit()
+    finally:
+        if own_conn and conn is not None:
+            conn.close()
+
+
 def row_to_game_dict(row: sqlite3.Row) -> Dict[str, Any]:
     if not row:
         return {}
@@ -272,4 +302,12 @@ def row_to_game_dict(row: sqlite3.Row) -> Dict[str, Any]:
             d["screenshots"] = []
     else:
         d["screenshots"] = []
+    raw_genres = d.get("genres_list") or ""
+    if raw_genres:
+        parsed_genres = [g.strip() for g in str(raw_genres).split("|") if g.strip()]
+    elif d.get("genre"):
+        parsed_genres = [str(d["genre"]).strip()]
+    else:
+        parsed_genres = []
+    d["genres"] = parsed_genres
     return d
