@@ -866,7 +866,7 @@ export default function GameDetailModal({
                       <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
                       <div className="min-w-0">
                         <div className="font-bold">
-                          ROM Saved on {downloadState?.destination_label || (resolvedLocalPath.includes('CloudDocs') ? 'iCloud Drive' : resolvedLocalPath.includes('GoogleDrive') ? 'Google Drive' : resolvedLocalPath.includes('OneDrive') ? 'OneDrive' : 'Local Drive')}
+                          ROM Saved on {downloadState?.destination_label || (resolvedLocalPath.includes('CloudDocs') ? 'iCloud Drive' : resolvedLocalPath.includes('GoogleDrive') ? 'Google Drive' : resolvedLocalPath.includes('OneDrive') ? 'OneDrive' : resolvedLocalPath.startsWith('WebDAV:') ? 'WebDAV Cloud / NAS' : 'Local Drive')}
                         </div>
                         <div className="text-xs text-emerald-400/80 font-mono truncate">
                           {resolvedLocalPath || `OmniVault/ROMs/${game.platform}/`}

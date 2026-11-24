@@ -141,12 +141,13 @@ export default function UnifiedSettingsModal({
   const [savingStorage, setSavingStorage] = useState(false);
   const [browsingField, setBrowsingField] = useState(null);
 
-  // Cloud Storage Destinations State (iCloud Drive, Google Drive, OneDrive)
+  // Cloud Storage Destinations State (iCloud Drive, Google Drive, OneDrive, WebDAV)
   const [cloudConfig, setCloudConfig] = useState({ default_target: 'local', targets: [] });
   const [cloudEdits, setCloudEdits] = useState({
-    icloud: { custom_path: '', prefer_api: false, delete_local_after_upload: false },
-    gdrive: { custom_path: '', prefer_api: false, delete_local_after_upload: true, access_token: '', refresh_token: '', client_id: '' },
-    onedrive: { custom_path: '', prefer_api: false, delete_local_after_upload: true, access_token: '', refresh_token: '', client_id: '' },
+    icloud: { custom_path: '', prefer_api: false, delete_local_after_upload: false, evict_local_after_sync: false },
+    gdrive: { custom_path: '', prefer_api: false, delete_local_after_upload: true, evict_local_after_sync: false, access_token: '', refresh_token: '', client_id: '' },
+    onedrive: { custom_path: '', prefer_api: false, delete_local_after_upload: true, evict_local_after_sync: false, access_token: '', refresh_token: '', client_id: '' },
+    webdav: { webdav_url: '', username: '', password: '', base_path: '' },
   });
   const [expandedCloudApi, setExpandedCloudApi] = useState(null);
   const [testingCloudId, setTestingCloudId] = useState(null);
@@ -192,6 +193,10 @@ export default function UnifiedSettingsModal({
             access_token: '',
             refresh_token: '',
             client_id: t.client_id || '',
+            webdav_url: t.webdav_url || '',
+            username: t.username || '',
+            password: '',
+            base_path: t.base_path || '',
           };
         });
         setCloudEdits((prev) => ({ ...prev, ...nextEdits }));
@@ -340,6 +345,10 @@ export default function UnifiedSettingsModal({
         access_token: edit.access_token,
         refresh_token: edit.refresh_token,
         client_id: edit.client_id,
+        webdav_url: edit.webdav_url,
+        username: edit.username,
+        password: edit.password,
+        base_path: edit.base_path,
       });
       setCloudTestResults((prev) => ({ ...prev, [pid]: res }));
       if (res.status === 'ok') playVictorySound();
@@ -421,16 +430,25 @@ export default function UnifiedSettingsModal({
     setSavingCloudId(pid);
     try {
       const edit = cloudEdits[pid] || {};
-      const payload = {
-        provider_id: pid,
-        custom_path: edit.custom_path || '',
-        prefer_api: Boolean(edit.prefer_api),
-        delete_local_after_upload: Boolean(edit.delete_local_after_upload),
-        evict_local_after_sync: Boolean(edit.evict_local_after_sync),
-        client_id: edit.client_id?.trim() || '',
-        clear_token: clearToken,
-      };
-      if (!clearToken) {
+      const payload = pid === 'webdav'
+        ? {
+            provider_id: 'webdav',
+            webdav_url: edit.webdav_url || '',
+            username: edit.username || '',
+            password: edit.password || '',
+            base_path: edit.base_path || '',
+            clear_token: clearToken,
+          }
+        : {
+            provider_id: pid,
+            custom_path: edit.custom_path || '',
+            prefer_api: Boolean(edit.prefer_api),
+            delete_local_after_upload: Boolean(edit.delete_local_after_upload),
+            evict_local_after_sync: Boolean(edit.evict_local_after_sync),
+            client_id: edit.client_id?.trim() || '',
+            clear_token: clearToken,
+          };
+      if (!clearToken && pid !== 'webdav') {
         if (edit.access_token?.trim()) payload.access_token = edit.access_token.trim();
         if (edit.refresh_token?.trim()) payload.refresh_token = edit.refresh_token.trim();
       }
@@ -438,7 +456,7 @@ export default function UnifiedSettingsModal({
       setCloudConfig({ default_target: res.default_target, targets: res.targets || [] });
       setCloudEdits((prev) => ({
         ...prev,
-        [pid]: { ...(prev[pid] || {}), access_token: '', refresh_token: '' },
+        [pid]: { ...(prev[pid] || {}), access_token: '', refresh_token: '', password: '' },
       }));
       if (onSourcesChanged) onSourcesChanged();
       playVictorySound();
@@ -1147,16 +1165,16 @@ export default function UnifiedSettingsModal({
                     </div>
                   )}
 
-                  {/* CLOUD DRIVE DESTINATIONS (ICLOUD DRIVE, GOOGLE DRIVE, ONEDRIVE) */}
+                  {/* CLOUD DRIVE DESTINATIONS (ICLOUD DRIVE, GOOGLE DRIVE, ONEDRIVE, WEBDAV) */}
                   <div className="p-5 rounded-2xl bg-gradient-to-br from-sky-950/35 via-slate-900 to-slate-900 border border-sky-500/30 space-y-4">
                     <div className="flex items-center justify-between gap-3 flex-wrap">
                       <div>
                         <h4 className="text-sm font-black text-white flex items-center gap-2">
                           <Cloud className="w-4 h-4 text-sky-400" />
-                          <span>Cloud Drive Destinations (iCloud Drive • Google Drive • OneDrive)</span>
+                          <span>Cloud Drive Destinations (iCloud • Google Drive • OneDrive • WebDAV)</span>
                         </h4>
                         <p className="text-xs text-slate-300 mt-1">
-                          Sign in &amp; allow your cloud drive to stream ROMs straight into dedicated <span className="font-mono text-sky-300">OmniVault/ROMs/&lt;Console&gt;/</span> folders — with zero-local-disk streaming in Direct Cloud mode.
+                          Sign in &amp; allow your cloud drive (or connect WebDAV / NAS with zero API keys) to stream ROMs straight into dedicated <span className="font-mono text-sky-300">OmniVault/ROMs/&lt;Console&gt;/</span> folders.
                         </p>
                       </div>
                       <button
@@ -1180,6 +1198,7 @@ export default function UnifiedSettingsModal({
                         const isDefault = cloudConfig.default_target === t.id;
                         const isExpanded = expandedCloudApi === t.id;
                         const isWaitingAuth = oauthWaitingId === t.id;
+                        const isWebDav = t.id === 'webdav';
                         return (
                           <div
                             key={t.id}
@@ -1199,10 +1218,8 @@ export default function UnifiedSettingsModal({
                                     : 'bg-slate-800 text-slate-400 border-white/10'
                                 }`}>
                                   {t.available
-                                    ? (t.mode === 'api'
-                                      ? '✓ Signed In • 0 Local Disk Stream'
-                                      : `✓ Connected • ${t.free_gb || 0} GB Free`)
-                                    : (isWaitingAuth ? 'Waiting for Sign-In...' : 'Not Signed In')}
+                                    ? `✓ Connected • ${t.quota_label || (t.mode === 'api' ? '0 Local Disk Stream' : 'Cloud Sync Ready')}`
+                                    : (isWaitingAuth ? 'Waiting for Sign-In...' : (isWebDav ? 'Optional (0-Disk Stream)' : 'Not Signed In'))}
                                 </span>
                                 {t.zero_local_disk && (
                                   <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-700/60">
@@ -1225,7 +1242,7 @@ export default function UnifiedSettingsModal({
                                       Sign in to iCloud
                                     </button>
                                   )
-                                ) : (
+                                ) : isWebDav ? null : (
                                   <>
                                     <button
                                       type="button"
@@ -1255,16 +1272,18 @@ export default function UnifiedSettingsModal({
                                   <RefreshCw className={`w-3 h-3 ${testingCloudId === t.id ? 'animate-spin' : ''}`} />
                                   <span>Test</span>
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleBrowseCloudFolder(t.id, t.custom_path || t.mount_path)}
-                                  disabled={browsingField === `cloud_${t.id}`}
-                                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                                >
-                                  <FolderOpen className="w-3 h-3" />
-                                  <span>Folder...</span>
-                                </button>
-                                {t.roms_path && !String(t.roms_path).startsWith('Google Drive:') && !String(t.roms_path).startsWith('OneDrive:') && (
+                                {!isWebDav && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleBrowseCloudFolder(t.id, t.custom_path || t.mount_path)}
+                                    disabled={browsingField === `cloud_${t.id}`}
+                                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <FolderOpen className="w-3 h-3" />
+                                    <span>Folder...</span>
+                                  </button>
+                                )}
+                                {t.roms_path && !String(t.roms_path).startsWith('Google Drive:') && !String(t.roms_path).startsWith('OneDrive:') && !String(t.roms_path).startsWith('WebDAV:') && (
                                   <button
                                     type="button"
                                     onClick={() => revealStorageFolder('roms', t.roms_path)}
@@ -1292,7 +1311,7 @@ export default function UnifiedSettingsModal({
                                   onClick={() => setExpandedCloudApi(isExpanded ? null : t.id)}
                                   className="px-2.5 py-1 rounded-lg bg-violet-950/60 hover:bg-violet-900/60 text-violet-300 border border-violet-500/30 text-[11px] font-bold cursor-pointer"
                                 >
-                                  {isExpanded ? 'Hide Options' : 'Options'}
+                                  {isExpanded ? 'Hide Setup' : (isWebDav ? 'Connect WebDAV / NAS' : 'Options')}
                                 </button>
                               </div>
                             </div>
@@ -1301,7 +1320,7 @@ export default function UnifiedSettingsModal({
                               <span className="truncate">
                                 Console Folder Layout:{' '}
                                 <span className="text-slate-200">
-                                  {(t.roms_path || `${t.name}/OmniVault/ROMs`).replace(/\/+$/, '')}/&lt;Console&gt;/
+                                  {(t.roms_path || `${t.name}/OmniVault/ROMs`).replace(/\/+$/, '').replace(/\/<Console>$/, '')}/&lt;Console&gt;/
                                 </span>
                               </span>
                               <span className="text-emerald-400 text-[10px]">
@@ -1321,7 +1340,78 @@ export default function UnifiedSettingsModal({
 
                             {isExpanded && (
                               <div className="p-3.5 rounded-xl bg-black/40 border border-white/10 space-y-3">
-                                {t.supports_oauth ? (
+                                {isWebDav ? (
+                                  <>
+                                    <div className="text-[11px] text-slate-300 leading-relaxed">
+                                      <strong className="text-white">Zero-API Direct Cloud / NAS Proxy Streaming:</strong>{' '}
+                                      Works with <strong>pCloud, Nextcloud, Koofr, Box, or Synology NAS</strong> — streams ROMs straight through RAM into <span className="font-mono text-cyan-300">OmniVault/ROMs/&lt;Console&gt;/</span> with <strong>0 bytes stored locally</strong> and zero OAuth apps or API keys required.
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                      <input
+                                        type="text"
+                                        value={edit.webdav_url || ''}
+                                        onChange={(e) => setCloudEdits((prev) => ({
+                                          ...prev,
+                                          webdav: { ...edit, webdav_url: e.target.value },
+                                        }))}
+                                        placeholder="WebDAV URL (e.g. https://webdav.pcloud.com or https://nas.local:5006)"
+                                        className="px-3 py-2 rounded-xl bg-slate-950 border border-white/10 text-xs font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-sky-400 sm:col-span-2"
+                                      />
+                                      <input
+                                        type="text"
+                                        value={edit.username || ''}
+                                        onChange={(e) => setCloudEdits((prev) => ({
+                                          ...prev,
+                                          webdav: { ...edit, username: e.target.value },
+                                        }))}
+                                        placeholder="Username / Email"
+                                        className="px-3 py-2 rounded-xl bg-slate-950 border border-white/10 text-xs font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-sky-400"
+                                      />
+                                      <input
+                                        type="password"
+                                        value={edit.password || ''}
+                                        onChange={(e) => setCloudEdits((prev) => ({
+                                          ...prev,
+                                          webdav: { ...edit, password: e.target.value },
+                                        }))}
+                                        placeholder={t.has_api_token ? `App Password (${t.masked_token || 'Saved'})` : 'Password / App Password'}
+                                        className="px-3 py-2 rounded-xl bg-slate-950 border border-white/10 text-xs font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-sky-400"
+                                      />
+                                    </div>
+                                    <div className="flex items-center justify-between flex-wrap gap-2">
+                                      <input
+                                        type="text"
+                                        value={edit.base_path || ''}
+                                        onChange={(e) => setCloudEdits((prev) => ({
+                                          ...prev,
+                                          webdav: { ...edit, base_path: e.target.value },
+                                        }))}
+                                        placeholder="Optional base folder (e.g. Games or remote.php/dav/files/user)"
+                                        className="flex-1 min-w-[220px] px-3 py-1.5 rounded-xl bg-slate-950 border border-white/10 text-xs font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-sky-400"
+                                      />
+                                      <div className="flex items-center gap-2">
+                                        {t.available && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleSaveCloudProvider('webdav', true)}
+                                            disabled={savingCloudId === 'webdav'}
+                                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-rose-300 text-xs font-bold cursor-pointer"
+                                          >
+                                            Disconnect
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSaveCloudProvider('webdav', false)}
+                                          disabled={savingCloudId === 'webdav'}
+                                          className="px-3.5 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-black text-xs font-black cursor-pointer"
+                                        >
+                                          {savingCloudId === 'webdav' ? 'Saving...' : 'Save WebDAV'}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </>
+                                ) : t.supports_oauth ? (
                                   <>
                                     <div className="text-[11px] text-slate-300 leading-relaxed">
                                       <strong className="text-white">Browser OAuth 2.0 PKCE Sign-In (0 Local Disk Direct Cloud Stream):</strong>{' '}

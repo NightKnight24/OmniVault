@@ -15,7 +15,7 @@ import urllib.parse
 import webbrowser
 import zipfile
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -30,6 +30,7 @@ CLOUD_PROVIDER_META: Dict[str, Dict[str, Any]] = {
         "short_name": "iCloud",
         "supports_api": False,
         "supports_oauth": False,
+        "supports_webdav": False,
         "badge_color": "sky",
     },
     "gdrive": {
@@ -38,6 +39,7 @@ CLOUD_PROVIDER_META: Dict[str, Dict[str, Any]] = {
         "short_name": "GDrive",
         "supports_api": True,
         "supports_oauth": True,
+        "supports_webdav": False,
         "badge_color": "emerald",
     },
     "onedrive": {
@@ -46,15 +48,26 @@ CLOUD_PROVIDER_META: Dict[str, Dict[str, Any]] = {
         "short_name": "OneDrive",
         "supports_api": True,
         "supports_oauth": True,
+        "supports_webdav": False,
         "badge_color": "blue",
+    },
+    "webdav": {
+        "id": "webdav",
+        "name": "WebDAV Cloud / NAS",
+        "short_name": "WebDAV",
+        "supports_api": True,
+        "supports_oauth": False,
+        "supports_webdav": True,
+        "badge_color": "violet",
     },
 }
 
-VALID_TARGET_IDS = ("local", "icloud", "gdrive", "onedrive")
-CLOUD_TARGET_IDS = ("icloud", "gdrive", "onedrive")
+VALID_TARGET_IDS = ("local", "icloud", "gdrive", "onedrive", "webdav")
+CLOUD_TARGET_IDS = ("icloud", "gdrive", "onedrive", "webdav")
 
 # Ephemeral PKCE state store (in-memory only, never persisted to git)
 _PENDING_OAUTH_STATES: Dict[str, Dict[str, Any]] = {}
+_ICLOUD_QUOTA_CACHE: Dict[str, Any] = {"ts": 0.0, "free_gb": None}
 
 
 def sanitize_console_folder_name(platform: str) -> str:
@@ -95,6 +108,14 @@ def _default_cloud_config() -> Dict[str, Any]:
                 "client_id": "",
                 "client_secret": "",
                 "connected_account": "",
+            },
+            "webdav": {
+                "webdav_url": "",
+                "username": "",
+                "password": "",
+                "base_path": "",
+                "prefer_api": True,
+                "delete_local_after_upload": True,
             },
         },
     }
@@ -167,6 +188,32 @@ def _safe_disk_free_gb(target: Path) -> float:
         return 0.0
 
 
+def _get_icloud_real_quota_gb(force_refresh: bool = False) -> Optional[float]:
+    """Queries actual remote iCloud remaining quota via macOS `/usr/bin/brctl quota` instead of local SSD free space."""
+    if sys.platform != "darwin" or not Path("/usr/bin/brctl").exists():
+        return None
+    now = time.monotonic()
+    if not force_refresh and (now - _ICLOUD_QUOTA_CACHE["ts"]) < 60.0:
+        return _ICLOUD_QUOTA_CACHE["free_gb"]
+    free_gb: Optional[float] = None
+    try:
+        res = subprocess.run(
+            ["/usr/bin/brctl", "quota"],
+            capture_output=True,
+            text=True,
+            timeout=4,
+            check=False,
+        )
+        m = re.search(r"(\d+)\s+bytes\s+of\s+quota\s+remaining", res.stdout or "", re.I)
+        if m:
+            free_gb = round(int(m.group(1)) / (1024 ** 3), 2)
+    except Exception:
+        free_gb = None
+    _ICLOUD_QUOTA_CACHE["ts"] = now
+    _ICLOUD_QUOTA_CACHE["free_gb"] = free_gb
+    return free_gb
+
+
 def _pick_writable_subdir(base_dir: Path) -> Optional[Path]:
     try:
         if base_dir.exists() and os.access(str(base_dir), os.W_OK):
@@ -215,7 +262,8 @@ def detect_native_cloud_mounts() -> Dict[str, Dict[str, Any]]:
                 "mount_path": str(p),
                 "roms_path": str(roms_p),
                 "account": "Apple ID (iCloud Sync)",
-                "free_gb": _safe_disk_free_gb(p),
+                "local_cache_free_gb": _safe_disk_free_gb(p),
+                "free_gb": _get_icloud_real_quota_gb(),
             }
             break
 
@@ -251,7 +299,8 @@ def detect_native_cloud_mounts() -> Dict[str, Dict[str, Any]]:
             "mount_path": str(gdrive_mount),
             "roms_path": str(_derive_roms_subpath(gdrive_mount)),
             "account": gdrive_account or "Google Drive Sync",
-            "free_gb": _safe_disk_free_gb(gdrive_mount),
+            "local_cache_free_gb": _safe_disk_free_gb(gdrive_mount),
+            "free_gb": None,
         }
 
     # 3. Microsoft OneDrive
@@ -292,7 +341,8 @@ def detect_native_cloud_mounts() -> Dict[str, Dict[str, Any]]:
             "mount_path": str(onedrive_mount),
             "roms_path": str(_derive_roms_subpath(onedrive_mount)),
             "account": onedrive_account or "OneDrive Sync",
-            "free_gb": _safe_disk_free_gb(onedrive_mount),
+            "local_cache_free_gb": _safe_disk_free_gb(onedrive_mount),
+            "free_gb": None,
         }
 
     return detected
@@ -310,11 +360,63 @@ def _desktop_app_installed(pid: str) -> bool:
     return False
 
 
+def _webdav_auth_and_base(pcfg: Dict[str, Any]) -> Tuple[str, Optional[httpx.BasicAuth]]:
+    raw_url = str(pcfg.get("webdav_url") or "").strip().rstrip("/")
+    base_sub = str(pcfg.get("base_path") or "").strip().strip("/")
+    full_base = f"{raw_url}/{base_sub}" if (raw_url and base_sub) else raw_url
+    user = str(pcfg.get("username") or "").strip()
+    pwd = str(pcfg.get("password") or "").strip()
+    auth = httpx.BasicAuth(user, pwd) if (user or pwd) else None
+    return full_base, auth
+
+
 def _build_target_entry(pid: str, cfg: Dict[str, Any], mounts: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     meta = CLOUD_PROVIDER_META[pid]
     pcfg = cfg.get("providers", {}).get(pid) or {}
-    native = mounts.get(pid)
 
+    if pid == "webdav":
+        wurl = str(pcfg.get("webdav_url") or "").strip()
+        wuser = str(pcfg.get("username") or "").strip()
+        wpwd = str(pcfg.get("password") or "").strip()
+        wbase = str(pcfg.get("base_path") or "").strip().strip("/")
+        parsed = urllib.parse.urlparse(wurl) if wurl else None
+        is_valid = bool(parsed and parsed.scheme in ("http", "https") and parsed.netloc)
+        host_label = parsed.netloc if parsed and parsed.netloc else ""
+        account = f"{wuser}@{host_label}" if (wuser and host_label) else host_label
+        base_seg = f"{wbase}/" if wbase else ""
+        return {
+            "id": "webdav",
+            "name": meta["name"],
+            "short_name": meta["short_name"],
+            "available": is_valid,
+            "mode": "api" if is_valid else "unconfigured",
+            "zero_local_disk": is_valid,
+            "console_subfolder_pattern": "OmniVault/ROMs/<Console>/",
+            "mount_path": "",
+            "roms_path": f"WebDAV:/{base_seg}OmniVault/ROMs/<Console>/" if is_valid else "",
+            "custom_path": "",
+            "webdav_url": wurl,
+            "username": wuser,
+            "base_path": wbase,
+            "account": account,
+            "free_gb": None,
+            "local_cache_free_gb": None,
+            "quota_label": "0 Local Disk Stream" if is_valid else "",
+            "supports_api": True,
+            "supports_oauth": False,
+            "supports_webdav": True,
+            "desktop_app_installed": False,
+            "has_oauth_client_id": False,
+            "client_id": "",
+            "has_api_token": bool(is_valid and (wuser or wpwd)),
+            "masked_token": _mask_secret(wpwd),
+            "prefer_api": True,
+            "delete_local_after_upload": True,
+            "evict_local_after_sync": False,
+            "badge_color": meta["badge_color"],
+        }
+
+    native = mounts.get(pid)
     custom_path_str = str(pcfg.get("custom_path") or "").strip()
     custom_roms: Optional[Path] = None
     custom_valid = False
@@ -337,7 +439,9 @@ def _build_target_entry(pid: str, cfg: Dict[str, Any], mounts: Dict[str, Dict[st
     mount_path = ""
     roms_path = ""
     account = ""
-    free_gb = 0.0
+    free_gb: Optional[float] = None
+    local_cache_free_gb: Optional[float] = None
+    quota_label = ""
     mode = "unconfigured"
     available = False
     zero_local_disk = False
@@ -347,15 +451,21 @@ def _build_target_entry(pid: str, cfg: Dict[str, Any], mounts: Dict[str, Dict[st
         mode = "api"
         available = True
         zero_local_disk = True
+        quota_label = "0 Local Disk Stream"
         roms_path = f"{meta['name']}:/OmniVault/ROMs/<Console>/"
         if native:
             mount_path = native["mount_path"]
-            free_gb = native["free_gb"]
+            local_cache_free_gb = native.get("local_cache_free_gb")
     elif custom_valid and custom_roms is not None:
         mount_path = custom_path_str
         roms_path = str(custom_roms)
         account = "Custom Sync Folder"
-        free_gb = _safe_disk_free_gb(custom_roms)
+        local_cache_free_gb = _safe_disk_free_gb(custom_roms)
+        if pid == "icloud":
+            free_gb = _get_icloud_real_quota_gb()
+            quota_label = f"{free_gb} GB iCloud Free" if free_gb is not None else "iCloud Sync Ready"
+        else:
+            quota_label = "Cloud Sync Ready"
         mode = "mount"
         available = True
         zero_local_disk = bool(pcfg.get("evict_local_after_sync"))
@@ -363,7 +473,12 @@ def _build_target_entry(pid: str, cfg: Dict[str, Any], mounts: Dict[str, Dict[st
         mount_path = native["mount_path"]
         roms_path = native["roms_path"]
         account = native["account"]
-        free_gb = native["free_gb"]
+        free_gb = native.get("free_gb")
+        local_cache_free_gb = native.get("local_cache_free_gb")
+        if pid == "icloud":
+            quota_label = f"{free_gb} GB iCloud Free" if free_gb is not None else "iCloud Sync Ready"
+        else:
+            quota_label = "Cloud Sync Ready"
         mode = "mount"
         available = True
         zero_local_disk = bool(pcfg.get("evict_local_after_sync"))
@@ -372,6 +487,7 @@ def _build_target_entry(pid: str, cfg: Dict[str, Any], mounts: Dict[str, Dict[st
         mode = "api"
         available = True
         zero_local_disk = True
+        quota_label = "0 Local Disk Stream"
         roms_path = f"{meta['name']}:/OmniVault/ROMs/<Console>/"
 
     return {
@@ -387,8 +503,11 @@ def _build_target_entry(pid: str, cfg: Dict[str, Any], mounts: Dict[str, Dict[st
         "custom_path": custom_path_str,
         "account": account,
         "free_gb": free_gb,
+        "local_cache_free_gb": local_cache_free_gb,
+        "quota_label": quota_label,
         "supports_api": bool(meta["supports_api"]),
         "supports_oauth": bool(meta["supports_oauth"]),
+        "supports_webdav": False,
         "desktop_app_installed": _desktop_app_installed(pid),
         "has_oauth_client_id": bool(eff_client_id),
         "client_id": str(pcfg.get("client_id") or ""),
@@ -421,6 +540,25 @@ def save_cloud_targets_config(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     def _apply_provider_update(pid: str, upd: Dict[str, Any]) -> None:
         target_cfg = cfg["providers"].setdefault(pid, {})
+        if pid == "webdav":
+            if upd.get("clear_token"):
+                target_cfg["webdav_url"] = ""
+                target_cfg["username"] = ""
+                target_cfg["password"] = ""
+                target_cfg["base_path"] = ""
+                if cfg.get("default_target") == "webdav":
+                    cfg["default_target"] = "local"
+                return
+            if "webdav_url" in upd:
+                target_cfg["webdav_url"] = str(upd.get("webdav_url") or "").strip().rstrip("/")
+            if "username" in upd:
+                target_cfg["username"] = str(upd.get("username") or "").strip()
+            if "password" in upd and str(upd.get("password") or "").strip():
+                target_cfg["password"] = str(upd.get("password") or "").strip()
+            if "base_path" in upd:
+                target_cfg["base_path"] = str(upd.get("base_path") or "").strip().strip("/")
+            return
+
         if "custom_path" in upd:
             target_cfg["custom_path"] = str(upd.get("custom_path") or "").strip()
         if "prefer_api" in upd:
@@ -461,8 +599,8 @@ def resolve_download_destination(platform: str, requested_target: Optional[str] 
     """
     Resolves the console-organized destination and cloud streaming strategy for a queued download.
     Every download is organized under its own dedicated <Console> folder (e.g. OmniVault/ROMs/SNES/).
-    When mode == 'api', direct HTTP & Real-Debrid downloads stream straight through RAM to the cloud
-    with ZERO bytes written to the local drive.
+    When mode == 'api' (Google Drive OAuth, OneDrive OAuth, or WebDAV Cloud/NAS), HTTP & Real-Debrid
+    downloads stream straight through RAM to the cloud with ZERO bytes written to the local drive.
     """
     from .storage_service import get_roms_dir
 
@@ -492,10 +630,14 @@ def resolve_download_destination(platform: str, requested_target: Optional[str] 
     if not entry["available"]:
         raise ValueError(
             f"{entry['name']} is not connected yet. "
-            f"Sign in to {entry['name']} in Settings -> Storage & Downloads."
+            f"Sign in or connect {entry['name']} in Settings -> Storage & Downloads."
         )
 
-    if entry["mode"] == "mount" and entry["roms_path"] and not str(entry["roms_path"]).startswith(("Google Drive:", "OneDrive:")):
+    if (
+        entry["mode"] == "mount"
+        and entry["roms_path"]
+        and not str(entry["roms_path"]).startswith(("Google Drive:", "OneDrive:", "WebDAV:"))
+    ):
         dest_dir = Path(entry["roms_path"]) / clean_plat
         dest_dir.mkdir(parents=True, exist_ok=True)
         return {
@@ -509,7 +651,6 @@ def resolve_download_destination(platform: str, requested_target: Optional[str] 
             "evict_local_after_sync": bool(entry.get("evict_local_after_sync")),
         }
 
-    # Direct Cloud API mode: do NOT create local folders upfront; only create temp dir lazily if raw P2P torrent needs piece assembly
     lazy_staging_dir = Path(tempfile.gettempdir()) / "omnivault_cloud_tmp" / clean_plat
     return {
         "target_id": eff_target,
@@ -529,8 +670,8 @@ def open_cloud_system_signin(provider_id: str) -> Dict[str, Any]:
     iCloud Drive, Google Drive, or OneDrive without manual token setup.
     """
     pid = (provider_id or "").strip().lower()
-    if pid not in CLOUD_TARGET_IDS:
-        raise ValueError(f"Unsupported cloud provider '{provider_id}'")
+    if pid not in ("icloud", "gdrive", "onedrive"):
+        raise ValueError(f"System app sign-in is not applicable to '{provider_id}'")
 
     if pid == "icloud":
         if sys.platform == "darwin":
@@ -541,11 +682,7 @@ def open_cloud_system_signin(provider_id: str) -> Dict[str, Any]:
                 "message": "Opened macOS Apple Account / iCloud Settings. Sign in and enable iCloud Drive — OmniVault will detect it automatically.",
             }
         webbrowser.open("https://support.apple.com/en-us/103232")
-        return {
-            "status": "opened",
-            "provider_id": "icloud",
-            "message": "Opened iCloud Drive setup page.",
-        }
+        return {"status": "opened", "provider_id": "icloud", "message": "Opened iCloud Drive setup page."}
 
     if pid == "gdrive":
         app_bundle = Path("/Applications/Google Drive.app")
@@ -567,7 +704,6 @@ def open_cloud_system_signin(provider_id: str) -> Dict[str, Any]:
             "message": "Opened Google Drive official installer, or enter an OAuth Client ID below to sign in directly in your browser.",
         }
 
-    # OneDrive
     app_bundle = Path("/Applications/OneDrive.app")
     if sys.platform == "darwin" and app_bundle.exists():
         subprocess.Popen(["open", "-a", str(app_bundle)])
@@ -614,10 +750,9 @@ def start_cloud_oauth_flow(
     if not eff_client_id:
         raise ValueError(
             f"Enter a free {CLOUD_PROVIDER_META[pid]['name']} Desktop OAuth Client ID once (no secret needed with PKCE) "
-            f"to use Browser Sign-In, or click 'Open {CLOUD_PROVIDER_META[pid]['name']} App' to sign in via the official desktop app."
+            f"to use Browser Sign-In, or click 'Sign in ({CLOUD_PROVIDER_META[pid]['short_name']} App)' to sign in via the official desktop app."
         )
 
-    # Prune expired pending states (>15 mins)
     now = time.time()
     for st_k in list(_PENDING_OAUTH_STATES.keys()):
         if now - _PENDING_OAUTH_STATES[st_k].get("created_at", 0) > 900:
@@ -854,6 +989,29 @@ async def _refresh_oauth_token(provider_id: str, pcfg: Dict[str, Any]) -> str:
     return access_token
 
 
+async def _ensure_webdav_folders(
+    client: httpx.AsyncClient,
+    base_url: str,
+    auth: Optional[httpx.BasicAuth],
+    segments: List[str],
+) -> str:
+    """Recursively creates WebDAV collection directories (`OmniVault/ROMs/<Console>`) using MKCOL."""
+    current = base_url.rstrip("/")
+    for seg in segments:
+        encoded = urllib.parse.quote(seg)
+        current = f"{current}/{encoded}"
+        resp = await client.request("MKCOL", current + "/", auth=auth)
+        if resp.status_code in (200, 201, 204, 301, 302, 405):
+            continue
+        if resp.status_code in (401, 403):
+            raise RuntimeError(f"WebDAV authentication failed (HTTP {resp.status_code})")
+        # Some WebDAV servers ignore MKCOL without trailing slash or return 409 if already present on rewrite
+        resp2 = await client.request("MKCOL", current, auth=auth)
+        if resp2.status_code not in (200, 201, 204, 301, 302, 405, 409):
+            raise RuntimeError(f"WebDAV MKCOL failed for '{seg}': HTTP {resp2.status_code}")
+    return current
+
+
 async def test_cloud_target(provider_id: str, override_payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     pid = (provider_id or "").strip().lower()
     if pid not in CLOUD_TARGET_IDS:
@@ -862,7 +1020,11 @@ async def test_cloud_target(provider_id: str, override_payload: Optional[Dict[st
     cfg = _load_raw_cloud_config()
     if isinstance(override_payload, dict):
         pcfg = dict(cfg["providers"].get(pid) or {})
-        for k in ("custom_path", "prefer_api", "delete_local_after_upload", "evict_local_after_sync", "access_token", "refresh_token", "client_id", "client_secret"):
+        for k in (
+            "custom_path", "prefer_api", "delete_local_after_upload", "evict_local_after_sync",
+            "access_token", "refresh_token", "client_id", "client_secret",
+            "webdav_url", "username", "password", "base_path",
+        ):
             if k in override_payload and override_payload.get(k) is not None and str(override_payload.get(k)).strip() != "":
                 pcfg[k] = override_payload[k]
         cfg["providers"][pid] = pcfg
@@ -874,25 +1036,76 @@ async def test_cloud_target(provider_id: str, override_payload: Optional[Dict[st
         return {
             "status": "error",
             "provider_id": pid,
-            "message": f"{entry['name']} is not signed in yet. Click 'Sign In' to connect your account.",
+            "message": f"{entry['name']} is not configured or signed in yet.",
         }
 
-    if entry["mode"] == "mount" and entry["roms_path"] and not str(entry["roms_path"]).startswith(("Google Drive:", "OneDrive:")):
+    # WebDAV / NAS test
+    if pid == "webdav":
+        pcfg = cfg["providers"]["webdav"]
+        base_url, auth = _webdav_auth_and_base(pcfg)
+        prop_xml = (
+            '<?xml version="1.0" encoding="utf-8" ?>'
+            '<D:propfind xmlns:D="DAV:"><D:prop><D:quota-available-bytes/></D:prop></D:propfind>'
+        )
+        try:
+            async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, verify=False) as client:
+                resp = await client.request(
+                    "PROPFIND",
+                    base_url + "/",
+                    content=prop_xml,
+                    headers={"Depth": "0", "Content-Type": "application/xml"},
+                    auth=auth,
+                )
+                if resp.status_code in (401, 403):
+                    return {"status": "error", "provider_id": "webdav", "mode": "api", "message": f"WebDAV login failed (HTTP {resp.status_code})"}
+                if resp.status_code in (405, 501):
+                    resp = await client.request("OPTIONS", base_url + "/", auth=auth)
+                if resp.status_code in (200, 204, 207):
+                    free_gb: Optional[float] = None
+                    qm = re.search(r"<[^>]*quota-available-bytes[^>]*>\s*(\d+)\s*</", resp.text or "", re.I)
+                    if qm:
+                        free_gb = round(int(qm.group(1)) / (1024 ** 3), 1)
+                    quota_txt = f" • {free_gb} GB free" if free_gb is not None else ""
+                    return {
+                        "status": "ok",
+                        "provider_id": "webdav",
+                        "mode": "api",
+                        "message": f"WebDAV verified ({entry['account']}) • 0 Local Disk Stream • OmniVault/ROMs/<Console>/{quota_txt}",
+                        "free_gb": free_gb,
+                    }
+                return {"status": "error", "provider_id": "webdav", "mode": "api", "message": f"WebDAV server returned HTTP {resp.status_code}"}
+        except Exception as exc:
+            return {"status": "error", "provider_id": "webdav", "mode": "api", "message": f"WebDAV connection error: {exc}"}
+
+    if (
+        entry["mode"] == "mount"
+        and entry["roms_path"]
+        and not str(entry["roms_path"]).startswith(("Google Drive:", "OneDrive:", "WebDAV:"))
+    ):
         try:
             roms_dir = Path(entry["roms_path"])
-            sample_console_dir = roms_dir / "SNES"
-            sample_console_dir.mkdir(parents=True, exist_ok=True)
+            roms_dir.mkdir(parents=True, exist_ok=True)
             probe = roms_dir / ".omnivault_cloud_probe"
             probe.write_text("ok", encoding="utf-8")
             probe.unlink(missing_ok=True)
-            free_gb = _safe_disk_free_gb(roms_dir)
+            if pid == "icloud":
+                real_gb = _get_icloud_real_quota_gb(force_refresh=True)
+                quota_note = f" • {real_gb} GB iCloud quota remaining" if real_gb is not None else ""
+                return {
+                    "status": "ok",
+                    "provider_id": pid,
+                    "mode": "mount",
+                    "message": f"iCloud Drive ready — organizes per console under {roms_dir}/<Console>/{quota_note}",
+                    "roms_path": str(roms_dir),
+                    "free_gb": real_gb,
+                }
             return {
                 "status": "ok",
                 "provider_id": pid,
                 "mode": "mount",
-                "message": f"{entry['name']} ready — organizes per console under {roms_dir}/<Console>/ ({free_gb} GB available)",
+                "message": f"{entry['name']} sync ready — organizes per console under {roms_dir}/<Console>/",
                 "roms_path": str(roms_dir),
-                "free_gb": free_gb,
+                "free_gb": None,
             }
         except Exception as exc:
             return {
@@ -908,7 +1121,7 @@ async def test_cloud_target(provider_id: str, override_payload: Optional[Dict[st
         token = await _refresh_oauth_token(pid, pcfg)
 
     if not token:
-        return {"status": "error", "provider_id": pid, "mode": "api", "message": "Access token missing — click Sign In to connect."}
+        return {"status": "error", "provider_id": pid, "mode": "api", "message": "Access token missing — click Browser Sign-In to connect."}
 
     try:
         async with httpx.AsyncClient(timeout=12.0, verify=False) as client:
@@ -1101,7 +1314,7 @@ async def _open_cloud_upload_session(
             raise RuntimeError("OneDrive did not return uploadUrl")
         return (
             upload_url,
-            10 * 1024 * 1024,  # 32 * 320 KiB
+            10 * 1024 * 1024,
             f"OneDrive:/OmniVault/ROMs/{clean_plat}/{filename}",
         )
 
@@ -1119,21 +1332,29 @@ async def stream_url_to_cloud_api(
 ) -> Dict[str, Any]:
     """
     ZERO-LOCAL-DISK CLOUD STREAMER:
-    Streams a ROM/game HTTP download directly through an 8–10 MB in-memory RAM buffer
-    into Google Drive or OneDrive under `OmniVault/ROMs/<Console>/<filename>` without
-    ever saving the file onto the local SSD or hard drive.
+    Streams a ROM/game HTTP download directly through a RAM buffer into Google Drive,
+    OneDrive, or WebDAV Cloud / NAS under `OmniVault/ROMs/<Console>/<filename>`
+    without ever saving the file onto the local SSD or hard drive.
     """
     pid = (provider_id or "").strip().lower()
     cfg = _load_raw_cloud_config()
     pcfg = cfg.get("providers", {}).get(pid) or {}
-    token = str(pcfg.get("access_token") or "").strip()
-    if not token and pcfg.get("refresh_token") and _resolve_oauth_client_id(pid, pcfg):
-        token = await _refresh_oauth_token(pid, pcfg)
-    if not token:
-        raise ValueError(f"Not signed in to {CLOUD_PROVIDER_META.get(pid, {}).get('name', pid)}")
-
     clean_plat = sanitize_console_folder_name(platform)
     filename = os.path.basename(fallback_filename or "rom_archive.zip") or "rom_archive.zip"
+
+    token = ""
+    webdav_base = ""
+    webdav_auth: Optional[httpx.BasicAuth] = None
+    if pid == "webdav":
+        webdav_base, webdav_auth = _webdav_auth_and_base(pcfg)
+        if not webdav_base:
+            raise ValueError("WebDAV Cloud / NAS URL is not configured")
+    else:
+        token = str(pcfg.get("access_token") or "").strip()
+        if not token and pcfg.get("refresh_token") and _resolve_oauth_client_id(pid, pcfg):
+            token = await _refresh_oauth_token(pid, pcfg)
+        if not token:
+            raise ValueError(f"Not signed in to {CLOUD_PROVIDER_META.get(pid, {}).get('name', pid)}")
 
     async with httpx.AsyncClient(timeout=120.0, follow_redirects=True, verify=False) as client:
         async with client.stream("GET", source_url, headers=request_headers) as response:
@@ -1153,7 +1374,47 @@ async def stream_url_to_cloud_api(
 
             total_bytes = int(response.headers.get("Content-Length") or 0)
 
-            # If server omitted Content-Length, buffer in RAM (up to 128 MB) to determine exact Content-Length
+            # WebDAV PUT streams directly through an async generator (~128 KB RAM buffer, 0 local disk)
+            if pid == "webdav":
+                folder_url = await _ensure_webdav_folders(client, webdav_base, webdav_auth, ["OmniVault", "ROMs", clean_plat])
+                target_url = f"{folder_url}/{urllib.parse.quote(filename)}"
+                base_sub = str(pcfg.get("base_path") or "").strip().strip("/")
+                remote_path = f"WebDAV:/{base_sub + '/' if base_sub else ''}OmniVault/ROMs/{clean_plat}/{filename}"
+                sent = 0
+                t_start = time.monotonic()
+
+                async def _webdav_ram_stream() -> AsyncIterator[bytes]:
+                    nonlocal sent
+                    async for net_chunk in response.aiter_bytes(chunk_size=131072):
+                        if is_paused_cb and is_paused_cb():
+                            raise asyncio.CancelledError("Download paused")
+                        sent += len(net_chunk)
+                        if progress_cb:
+                            elapsed = max(time.monotonic() - t_start, 0.01)
+                            progress_cb(sent, total_bytes or sent, (sent / (1024 * 1024)) / elapsed)
+                        yield net_chunk
+
+                put_headers: Dict[str, str] = {"Content-Type": "application/octet-stream"}
+                if total_bytes > 0:
+                    put_headers["Content-Length"] = str(total_bytes)
+
+                try:
+                    put_resp = await client.put(target_url, content=_webdav_ram_stream(), headers=put_headers, auth=webdav_auth)
+                except asyncio.CancelledError:
+                    return {"status": "paused"}
+                if put_resp.status_code not in (200, 201, 204):
+                    raise RuntimeError(f"WebDAV PUT upload failed: HTTP {put_resp.status_code}")
+
+                return {
+                    "status": "completed",
+                    "provider": CLOUD_PROVIDER_META["webdav"]["name"],
+                    "remote_path": remote_path,
+                    "filename": filename,
+                    "total_bytes": total_bytes or sent,
+                    "zero_local_disk": True,
+                }
+
+            # Google Drive & OneDrive require exact Content-Length upfront
             buffered_all: Optional[bytes] = None
             if total_bytes <= 0:
                 ram_acc = bytearray()
@@ -1235,16 +1496,11 @@ async def upload_file_to_cloud_api(
 ) -> Dict[str, Any]:
     """
     Uploads an assembled local file (e.g. from P2P BitTorrent piece assembly) into
-    Google Drive or OneDrive under `OmniVault/ROMs/<Console>/<filename>`.
+    Google Drive, OneDrive, or WebDAV Cloud / NAS under `OmniVault/ROMs/<Console>/<filename>`.
     """
     pid = (provider_id or "").strip().lower()
     cfg = _load_raw_cloud_config()
     pcfg = cfg.get("providers", {}).get(pid) or {}
-    token = str(pcfg.get("access_token") or "").strip()
-    if not token and pcfg.get("refresh_token") and _resolve_oauth_client_id(pid, pcfg):
-        token = await _refresh_oauth_token(pid, pcfg)
-    if not token:
-        raise ValueError(f"No API access token configured for {pid}")
 
     cleanup_temp_zip: Optional[Path] = None
     upload_path = local_path
@@ -1255,10 +1511,54 @@ async def upload_file_to_cloud_api(
 
     total_bytes = upload_path.stat().st_size
     clean_plat = sanitize_console_folder_name(platform)
-    allowed_codes = (200, 201, 308) if pid == "gdrive" else (200, 201, 202)
 
     try:
         async with httpx.AsyncClient(timeout=120.0, verify=False) as client:
+            if pid == "webdav":
+                webdav_base, webdav_auth = _webdav_auth_and_base(pcfg)
+                if not webdav_base:
+                    raise ValueError("WebDAV Cloud / NAS URL is not configured")
+                folder_url = await _ensure_webdav_folders(client, webdav_base, webdav_auth, ["OmniVault", "ROMs", clean_plat])
+                target_url = f"{folder_url}/{urllib.parse.quote(upload_path.name)}"
+                base_sub = str(pcfg.get("base_path") or "").strip().strip("/")
+                remote_path = f"WebDAV:/{base_sub + '/' if base_sub else ''}OmniVault/ROMs/{clean_plat}/{upload_path.name}"
+                sent = 0
+                t_start = time.monotonic()
+
+                async def _file_chunks() -> AsyncIterator[bytes]:
+                    nonlocal sent
+                    with open(upload_path, "rb") as fh:
+                        while True:
+                            chunk = fh.read(4 * 1024 * 1024)
+                            if not chunk:
+                                break
+                            sent += len(chunk)
+                            if progress_cb:
+                                elapsed = max(time.monotonic() - t_start, 0.01)
+                                progress_cb(sent, total_bytes, (sent / (1024 * 1024)) / elapsed)
+                            yield chunk
+
+                put_resp = await client.put(
+                    target_url,
+                    content=_file_chunks(),
+                    headers={"Content-Length": str(total_bytes), "Content-Type": "application/octet-stream"},
+                    auth=webdav_auth,
+                )
+                if put_resp.status_code not in (200, 201, 204):
+                    raise RuntimeError(f"WebDAV PUT failed: HTTP {put_resp.status_code}")
+                return {
+                    "provider": CLOUD_PROVIDER_META["webdav"]["name"],
+                    "remote_path": remote_path,
+                    "filename": upload_path.name,
+                }
+
+            token = str(pcfg.get("access_token") or "").strip()
+            if not token and pcfg.get("refresh_token") and _resolve_oauth_client_id(pid, pcfg):
+                token = await _refresh_oauth_token(pid, pcfg)
+            if not token:
+                raise ValueError(f"No API access token configured for {pid}")
+
+            allowed_codes = (200, 201, 308) if pid == "gdrive" else (200, 201, 202)
             session_uri, chunk_size, remote_path = await _open_cloud_upload_session(
                 client, pid, pcfg, token, clean_plat, upload_path.name, total_bytes
             )

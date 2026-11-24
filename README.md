@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/Systems-150%2B%20Platforms%20(inc.%20Switch%202%2C%20PS5%2C%20Xbox%20Series%20X%2C%20Win%20%26%20Mac)-purple?style=flat-square" alt="Systems" />
   <a href="https://github.com/NightKnight24/OmniVault/releases"><img src="https://img.shields.io/github/v/release/NightKnight24/OmniVault?label=Release&style=flat-square&color=emerald" alt="Release" /></a>
   <a href="https://github.com/NightKnight24/homebrew-omnivault"><img src="https://img.shields.io/badge/Homebrew-Tap-FBB040?style=flat-square&logo=homebrew&logoColor=black" alt="Homebrew Tap" /></a>
-  <a href="https://github.com/NightKnight24/OmniVault/pkgs/container/omnivault"><img src="https://img.shields.io/badge/GHCR-Docker%202.1.0-2496ED?style=flat-square&logo=docker&logoColor=white" alt="GHCR Package" /></a>
+  <a href="https://github.com/NightKnight24/OmniVault/pkgs/container/omnivault"><img src="https://img.shields.io/badge/GHCR-Docker%202.1.1-2496ED?style=flat-square&logo=docker&logoColor=white" alt="GHCR Package" /></a>
   <img src="https://img.shields.io/badge/Architecture-100%25%20BYOS-emerald?style=flat-square" alt="BYOS" />
   <img src="https://img.shields.io/badge/License-MIT-emerald?style=flat-square" alt="License" />
 </p>
@@ -24,7 +24,7 @@
 ## 🌟 Highlights
 
 - **Full 150+ System TheGamesDB Catalog & Metadata Organizer**: 1-click **Resync Catalog** downloads all games across **150+ consoles, handhelds, computers & modern platforms** (**PS5**, **Nintendo Switch 2**, **Xbox Series X/S**, **Xbox One**, **Windows**, **macOS**, **Amiga**, **3DO**, classic 8/16/32/64-bit consoles & arcade) with all **30 categories/genres**, **8,700+ developers**, **4,700+ publishers**, **ESRB age ratings**, **multiplayer & co-op filters**, release eras, verified front box art, 1080p fanart backdrops, and screenshots — using `0` API quota calls *(zero copyrighted ROM files bundled)*.
-- **Cloud Sign-In & Zero-Local-Disk Direct Streaming (`iCloud Drive` • `Google Drive` • `OneDrive`)**: Connect your cloud drive via **1-click System / Desktop App Sign-In** or **OAuth 2.0 PKCE Browser "Sign in & Allow"**, streaming ROMs and Real-Debrid downloads straight through an 8–10 MB RAM buffer into dedicated **`OmniVault/ROMs/<Console>/`** folders with **zero bytes written to your local drive** (plus optional automatic local copy offload after iCloud sync).
+- **Cloud Sign-In & Zero-Local-Disk Direct Streaming (`iCloud Drive` • `Google Drive` • `OneDrive` • `WebDAV Cloud / NAS`)**: Connect your cloud drive via **1-click System / Desktop App Sign-In** (real iCloud quota readout + Google Drive Stream / OneDrive Files On-Demand), **WebDAV Cloud / NAS** (pCloud, Nextcloud, Koofr, Box, Synology NAS with zero API keys), or **OAuth 2.0 PKCE Browser "Sign in & Allow"** — streaming ROMs and Real-Debrid downloads straight through RAM into dedicated **`OmniVault/ROMs/<Console>/`** folders with **zero bytes written to your local drive**.
 - **100% In-App Community Scrapers with Exact-Game Filtering**: Clicking any configured community source scrapes & queues downloads **directly inside OmniVault** (never opening external browser windows), with strict whole-word title normalization, Roman numeral & acronym resolution, sequel isolation, and Base/Update/DLC/Backport classification.
 - **Inline Trailers & Gameplay Previews**: Watch game trailers and gameplay directly inside each game's detail showcase alongside box art, screenshots, and synopses.
 - **Instant Filtering & 1-Click Resync**: Indexed SQLite queries (`<15ms`), abortable debounced filtering, `no-store` cache control, and toolbar **Refresh** + **Resync Catalog** buttons.
@@ -44,7 +44,7 @@ brew install --cask omnivault
 
 ### Option B: Download Pre-compiled App (Zero Setup)
 Download the standalone native macOS Apple Silicon app from **[GitHub Releases](https://github.com/NightKnight24/OmniVault/releases/latest)**:
-1. Download **`OmniVault-v2.1.0-macOS-arm64.zip`**.
+1. Download **`OmniVault-v2.1.1-macOS-arm64.zip`**.
 2. Unzip and drag `OmniVault.app` into `/Applications` (or `/Volumes/ROMS`).
 3. Double-click to launch!
 
