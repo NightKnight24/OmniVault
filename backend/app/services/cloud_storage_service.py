@@ -67,7 +67,7 @@ CLOUD_TARGET_IDS = ("icloud", "gdrive", "onedrive", "webdav")
 
 # Ephemeral PKCE state store (in-memory only, never persisted to git)
 _PENDING_OAUTH_STATES: Dict[str, Dict[str, Any]] = {}
-_ICLOUD_QUOTA_CACHE: Dict[str, Any] = {"ts": 0.0, "free_gb": None}
+_ICLOUD_QUOTA_CACHE: Dict[str, Any] = {"ts": 0.0, "ttl": 0.0, "free_gb": None}
 
 
 def sanitize_console_folder_name(platform: str) -> str:
@@ -193,16 +193,18 @@ def _get_icloud_real_quota_gb(force_refresh: bool = False) -> Optional[float]:
     if sys.platform != "darwin" or not Path("/usr/bin/brctl").exists():
         return None
     now = time.monotonic()
-    if not force_refresh and (now - _ICLOUD_QUOTA_CACHE["ts"]) < 60.0:
+    if not force_refresh and (now - _ICLOUD_QUOTA_CACHE["ts"]) < _ICLOUD_QUOTA_CACHE.get("ttl", 0.0):
         return _ICLOUD_QUOTA_CACHE["free_gb"]
     free_gb: Optional[float] = None
     try:
+        clean_env = {k: v for k, v in os.environ.items() if not k.startswith(("DYLD_", "PYTHON"))}
         res = subprocess.run(
             ["/usr/bin/brctl", "quota"],
             capture_output=True,
             text=True,
-            timeout=4,
+            timeout=8,
             check=False,
+            env=clean_env,
         )
         m = re.search(r"(\d+)\s+bytes\s+of\s+quota\s+remaining", res.stdout or "", re.I)
         if m:
@@ -210,6 +212,7 @@ def _get_icloud_real_quota_gb(force_refresh: bool = False) -> Optional[float]:
     except Exception:
         free_gb = None
     _ICLOUD_QUOTA_CACHE["ts"] = now
+    _ICLOUD_QUOTA_CACHE["ttl"] = 60.0 if free_gb is not None else 5.0
     _ICLOUD_QUOTA_CACHE["free_gb"] = free_gb
     return free_gb
 
@@ -238,6 +241,17 @@ def _resolve_oauth_client_id(pid: str, pcfg: Dict[str, Any]) -> str:
         return (os.environ.get("OMNIVAULT_GDRIVE_CLIENT_ID") or "").strip()
     if pid == "onedrive":
         return (os.environ.get("OMNIVAULT_ONEDRIVE_CLIENT_ID") or "").strip()
+    return ""
+
+
+def _resolve_oauth_client_secret(pid: str, pcfg: Dict[str, Any]) -> str:
+    saved = str(pcfg.get("client_secret") or "").strip()
+    if saved:
+        return saved
+    if pid == "gdrive":
+        return (os.environ.get("OMNIVAULT_GDRIVE_CLIENT_SECRET") or "").strip()
+    if pid == "onedrive":
+        return (os.environ.get("OMNIVAULT_ONEDRIVE_CLIENT_SECRET") or "").strip()
     return ""
 
 
@@ -432,6 +446,7 @@ def _build_target_entry(pid: str, cfg: Dict[str, Any], mounts: Dict[str, Dict[st
     token = str(pcfg.get("access_token") or "").strip()
     refresh = str(pcfg.get("refresh_token") or "").strip()
     eff_client_id = _resolve_oauth_client_id(pid, pcfg)
+    eff_client_secret = _resolve_oauth_client_secret(pid, pcfg)
     has_api_token = bool(meta["supports_api"] and (token or (refresh and eff_client_id)))
     prefer_api = bool(pcfg.get("prefer_api") and meta["supports_api"])
     connected_account = str(pcfg.get("connected_account") or "").strip()
@@ -511,6 +526,8 @@ def _build_target_entry(pid: str, cfg: Dict[str, Any], mounts: Dict[str, Dict[st
         "desktop_app_installed": _desktop_app_installed(pid),
         "has_oauth_client_id": bool(eff_client_id),
         "client_id": str(pcfg.get("client_id") or ""),
+        "has_oauth_client_secret": bool(eff_client_secret),
+        "masked_client_secret": _mask_secret(eff_client_secret),
         "has_api_token": has_api_token,
         "masked_token": _mask_secret(token or refresh),
         "prefer_api": prefer_api,
@@ -747,10 +764,17 @@ def start_cloud_oauth_flow(
     _save_raw_cloud_config(cfg)
 
     eff_client_id = _resolve_oauth_client_id(pid, pcfg)
+    eff_client_secret = _resolve_oauth_client_secret(pid, pcfg)
+    if pid == "gdrive" and (not eff_client_id or not eff_client_secret):
+        raise ValueError(
+            "Enter your free Google Cloud Desktop OAuth Client ID and Client Secret below to use Browser Sign-In "
+            "(0-Disk Stream), or use your connected Google Drive Desktop App with zero keys."
+        )
     if not eff_client_id:
         raise ValueError(
-            f"Enter a free {CLOUD_PROVIDER_META[pid]['name']} Desktop OAuth Client ID once (no secret needed with PKCE) "
-            f"to use Browser Sign-In, or click 'Sign in ({CLOUD_PROVIDER_META[pid]['short_name']} App)' to sign in via the official desktop app."
+            f"Enter your free {CLOUD_PROVIDER_META[pid]['name']} OAuth Client ID below "
+            f"(no secret needed with PKCE) to use Browser Sign-In, or click "
+            f"'Connect {CLOUD_PROVIDER_META[pid]['short_name']} App' for instant 0-key sign-in."
         )
 
     now = time.time()
@@ -768,7 +792,7 @@ def start_cloud_oauth_flow(
         "provider_id": pid,
         "code_verifier": code_verifier,
         "client_id": eff_client_id,
-        "client_secret": str(pcfg.get("client_secret") or "").strip(),
+        "client_secret": eff_client_secret,
         "redirect_uri": redirect_uri,
         "created_at": now,
     }
@@ -948,7 +972,7 @@ async def _refresh_oauth_token(provider_id: str, pcfg: Dict[str, Any]) -> str:
     access_token = str(pcfg.get("access_token") or "").strip()
     refresh_token = str(pcfg.get("refresh_token") or "").strip()
     client_id = _resolve_oauth_client_id(provider_id, pcfg)
-    client_secret = str(pcfg.get("client_secret") or "").strip()
+    client_secret = _resolve_oauth_client_secret(provider_id, pcfg)
 
     if not refresh_token or not client_id:
         return access_token

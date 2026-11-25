@@ -193,6 +193,7 @@ export default function UnifiedSettingsModal({
             access_token: '',
             refresh_token: '',
             client_id: t.client_id || '',
+            client_secret: '',
             webdav_url: t.webdav_url || '',
             username: t.username || '',
             password: '',
@@ -394,16 +395,27 @@ export default function UnifiedSettingsModal({
     }
   };
 
-  const handleCloudBrowserSignIn = async (pid, hasOAuthClient) => {
+  const handleCloudBrowserSignIn = async (target) => {
     playClick();
+    const pid = target.id;
     const edit = cloudEdits[pid] || {};
-    if (!hasOAuthClient && !edit.client_id?.trim()) {
+    const hasClientId = Boolean(target.has_oauth_client_id || edit.client_id?.trim());
+    const hasClientSecret = pid !== 'gdrive' || Boolean(target.has_oauth_client_secret || edit.client_secret?.trim());
+    if (!hasClientId || !hasClientSecret) {
       setExpandedCloudApi(pid);
+      let msg;
+      if (pid === 'gdrive') {
+        msg = target.available
+          ? "Google Drive Desktop App is already connected — click 'Set Default' to use it now (0 keys), or paste your free Google Desktop OAuth Client ID + Client Secret below and click 'Sign in with Browser' for 0-Local-Disk streaming."
+          : "Click 'Sign in (GDrive App)' for instant 0-key sign-in, or paste your free Google Desktop OAuth Client ID + Client Secret below and click 'Sign in with Browser'.";
+      } else {
+        msg = "Click 'Connect OneDrive App' for instant 0-key sign-in, or paste your free Microsoft Entra Application (Client) ID below (no secret needed) and click 'Sign in with Browser'.";
+      }
       setCloudTestResults((prev) => ({
         ...prev,
         [pid]: {
-          status: 'error',
-          message: 'Click "Sign in via Desktop App" for instant 0-key sign-in, or enter your free OAuth Client ID below to use Browser PKCE Sign-In.',
+          status: 'info',
+          message: msg,
         },
       }));
       return;
@@ -412,6 +424,7 @@ export default function UnifiedSettingsModal({
       const res = await startCloudOAuth({
         provider_id: pid,
         client_id: edit.client_id?.trim() || undefined,
+        client_secret: edit.client_secret?.trim() || undefined,
       });
       setOauthWaitingId(pid);
       setCloudTestResults((prev) => ({
@@ -446,6 +459,7 @@ export default function UnifiedSettingsModal({
             delete_local_after_upload: Boolean(edit.delete_local_after_upload),
             evict_local_after_sync: Boolean(edit.evict_local_after_sync),
             client_id: edit.client_id?.trim() || '',
+            client_secret: edit.client_secret?.trim() || '',
             clear_token: clearToken,
           };
       if (!clearToken && pid !== 'webdav') {
@@ -456,7 +470,7 @@ export default function UnifiedSettingsModal({
       setCloudConfig({ default_target: res.default_target, targets: res.targets || [] });
       setCloudEdits((prev) => ({
         ...prev,
-        [pid]: { ...(prev[pid] || {}), access_token: '', refresh_token: '', password: '' },
+        [pid]: { ...(prev[pid] || {}), access_token: '', refresh_token: '', client_secret: '', password: '' },
       }));
       if (onSourcesChanged) onSourcesChanged();
       playVictorySound();
@@ -1254,7 +1268,7 @@ export default function UnifiedSettingsModal({
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={() => handleCloudBrowserSignIn(t.id, Boolean(t.has_oauth_client_id || edit.client_id))}
+                                      onClick={() => handleCloudBrowserSignIn(t)}
                                       className="px-2.5 py-1 rounded-lg bg-sky-500 hover:bg-sky-400 text-black text-[11px] font-black cursor-pointer"
                                       title="Sign in & Allow in Browser (OAuth 2.0 PKCE — Direct 0-Disk Cloud Stream)"
                                     >
@@ -1329,10 +1343,12 @@ export default function UnifiedSettingsModal({
                             </div>
 
                             {testRes && (
-                              <div className={`p-2 rounded-xl text-xs font-semibold border ${
+                              <div className={`p-2.5 rounded-xl text-xs font-semibold border ${
                                 testRes.status === 'ok'
                                   ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
-                                  : 'bg-rose-950/60 border-rose-500/40 text-rose-300'
+                                  : testRes.status === 'info'
+                                    ? 'bg-amber-950/60 border-amber-500/40 text-amber-200'
+                                    : 'bg-rose-950/60 border-rose-500/40 text-rose-300'
                               }`}>
                                 {testRes.message}
                               </div>
@@ -1415,8 +1431,10 @@ export default function UnifiedSettingsModal({
                                   <>
                                     <div className="text-[11px] text-slate-300 leading-relaxed">
                                       <strong className="text-white">Browser OAuth 2.0 PKCE Sign-In (0 Local Disk Direct Cloud Stream):</strong>{' '}
-                                      Enter a free Desktop OAuth Client ID once (Google Cloud or Microsoft Entra public client — no secret required) and click{' '}
-                                      <strong className="text-sky-300">Browser Sign-In</strong> to sign in &amp; click Allow in your browser.
+                                      {t.id === 'gdrive'
+                                        ? 'Enter your own free Google Cloud Desktop OAuth Client ID and Client Secret once, then click '
+                                        : 'Enter your own free Microsoft Entra public Client ID once (no secret required), then click '}
+                                      <strong className="text-sky-300">Sign in with Browser</strong> to stream ROMs straight to <span className="font-mono text-cyan-300">OmniVault/ROMs/&lt;Console&gt;/</span> with 0 bytes written locally.
                                       {t.has_api_token && (
                                         <span className="ml-2 font-mono text-emerald-400">
                                           • Active Session ({t.masked_token || 'Connected'})
@@ -1431,9 +1449,21 @@ export default function UnifiedSettingsModal({
                                           ...prev,
                                           [t.id]: { ...edit, client_id: e.target.value },
                                         }))}
-                                        placeholder={`${t.name} Desktop OAuth Client ID (for Browser Sign-In)`}
+                                        placeholder={t.id === 'gdrive' ? 'Google Desktop OAuth Client ID (...apps.googleusercontent.com)' : 'Microsoft Entra Application (Client) ID'}
                                         className="px-3 py-2 rounded-xl bg-slate-950 border border-white/10 text-xs font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-sky-400"
                                       />
+                                      {t.id === 'gdrive' && (
+                                        <input
+                                          type="password"
+                                          value={edit.client_secret || ''}
+                                          onChange={(e) => setCloudEdits((prev) => ({
+                                            ...prev,
+                                            [t.id]: { ...edit, client_secret: e.target.value },
+                                          }))}
+                                          placeholder={t.has_oauth_client_secret ? `Google Client Secret (Saved: ${t.masked_client_secret || '****'})` : 'Google Desktop OAuth Client Secret (GOCSPX-...)'}
+                                          className="px-3 py-2 rounded-xl bg-slate-950 border border-white/10 text-xs font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-sky-400"
+                                        />
+                                      )}
                                       <input
                                         type="text"
                                         value={edit.custom_path || ''}
@@ -1442,8 +1472,24 @@ export default function UnifiedSettingsModal({
                                           [t.id]: { ...edit, custom_path: e.target.value },
                                         }))}
                                         placeholder="Optional custom local sync folder override"
-                                        className="px-3 py-2 rounded-xl bg-slate-950 border border-white/10 text-xs font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-sky-400"
+                                        className={`px-3 py-2 rounded-xl bg-slate-950 border border-white/10 text-xs font-mono text-white placeholder:text-slate-500 focus:outline-none focus:border-sky-400 ${t.id === 'gdrive' ? 'sm:col-span-2' : ''}`}
                                       />
+                                    </div>
+                                    <div className="p-2.5 rounded-xl bg-slate-950/80 border border-sky-500/20 text-[11px] text-slate-300 space-y-1">
+                                      <div className="font-bold text-sky-300">1-Time Free Setup Guide ({t.name}):</div>
+                                      {t.id === 'gdrive' ? (
+                                        <ol className="list-decimal list-inside space-y-0.5 text-slate-400">
+                                          <li>In <strong className="text-slate-200">Google Cloud Console</strong> → enable <strong className="text-slate-200">Google Drive API</strong></li>
+                                          <li>Go to <strong className="text-slate-200">APIs &amp; Services → Credentials → Create OAuth client ID → Desktop app</strong></li>
+                                          <li>Paste <strong className="text-slate-200">Client ID</strong> + <strong className="text-slate-200">Client Secret</strong> above &amp; click <strong className="text-sky-300">Sign in with Browser</strong> <em>(loopback 127.0.0.1 is automatic)</em></li>
+                                        </ol>
+                                      ) : (
+                                        <ol className="list-decimal list-inside space-y-0.5 text-slate-400">
+                                          <li>In <strong className="text-slate-200">Microsoft Entra</strong> → <strong className="text-slate-200">App registrations → New registration</strong></li>
+                                          <li>Add <strong className="text-slate-200">Mobile &amp; desktop</strong> Redirect URI: <code className="text-cyan-300">http://127.0.0.1:19842/api/storage/cloud-oauth/callback</code></li>
+                                          <li>Paste <strong className="text-slate-200">Application (client) ID</strong> above <em>(no secret needed)</em> &amp; click <strong className="text-sky-300">Sign in with Browser</strong></li>
+                                        </ol>
+                                      )}
                                     </div>
                                     <div className="flex items-center justify-between flex-wrap gap-3 text-xs">
                                       <div className="flex items-center gap-4 flex-wrap">
@@ -1485,9 +1531,16 @@ export default function UnifiedSettingsModal({
                                           type="button"
                                           onClick={() => handleSaveCloudProvider(t.id, false)}
                                           disabled={savingCloudId === t.id}
-                                          className="px-3.5 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-black text-xs font-black cursor-pointer"
+                                          className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/10 text-xs font-bold cursor-pointer"
                                         >
                                           {savingCloudId === t.id ? 'Saving...' : 'Save Options'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleCloudBrowserSignIn(t)}
+                                          className="px-3.5 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-black text-xs font-black cursor-pointer"
+                                        >
+                                          {isWaitingAuth ? 'Waiting...' : 'Sign in with Browser'}
                                         </button>
                                       </div>
                                     </div>
