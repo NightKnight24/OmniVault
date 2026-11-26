@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="OmniVault API",
     description="ROM Finder, Metadata Catalog & Download Manager",
-    version="2.1.5",
+    version="2.1.6",
     lifespan=lifespan
 )
 

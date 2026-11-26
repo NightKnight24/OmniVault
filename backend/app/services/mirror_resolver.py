@@ -11,7 +11,12 @@ import httpx
 from bs4 import BeautifulSoup
 
 from ..database import get_db_connection
-from .realdebrid_service import DEBRID_HOSTER_DOMAINS, is_hoster_url, is_realdebrid_active
+from .realdebrid_service import (
+    DEBRID_HOSTER_DOMAINS,
+    check_hoster_link,
+    is_hoster_url,
+    is_realdebrid_active,
+)
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -996,7 +1001,7 @@ def _rank_mirrors(streams: List[Dict[str, Any]], clean_q: str, rd_active: bool) 
 
         if rd_active:
             if is_rd and not is_tor:
-                return (0, title_bucket, match_neg, part_rank, src_prio, 0.0, 0)
+                return (0, part_rank, title_bucket, match_neg, src_prio, 0.0, 0)
             if is_rd and is_tor and (seeders > 0 or peers > 0):
                 return (1, title_bucket, match_neg, -seeders, -peers, part_rank, src_prio)
             if is_direct_val and not is_rd and not is_tor:
@@ -2104,7 +2109,7 @@ class MirrorResolver:
         for src in sources:
             if src.get("adapter") == "directory_link":
                 continue
-            tasks.append(self.scrape_source(src, query, platform=platform, limit=8, strict=True))
+            tasks.append(self.scrape_source(src, query, platform=platform, limit=12, strict=True))
 
         try:
             from ..scrapers.providers.manager import get_active_provider_instances
@@ -2112,12 +2117,14 @@ class MirrorResolver:
                 if target_source_id and prov.provider_id != target_source_id:
                     continue
                 if prov.provider_type in ("torznab", "torrent", "json_torrent_api", "rss_torrent_feed"):
-                    tasks.append(prov.search(query, platform, limit=6))
+                    tasks.append(prov.search(query, platform, limit=10))
         except Exception as te:
             print(f"[Provider search error]: {te}")
 
         if not tasks:
             return []
+
+        from .downloader import is_url_recently_failed
 
         raw_stream_lists = await asyncio.gather(*tasks, return_exceptions=True)
         all_streams: List[Dict[str, Any]] = []
@@ -2135,7 +2142,7 @@ class MirrorResolver:
                     or item.get("torrent_url")
                     or item.get("direct_download_url")
                 )
-                if not d_url or d_url in seen_urls:
+                if not d_url or d_url in seen_urls or is_url_recently_failed(str(d_url)):
                     continue
 
                 cand_title = str(item.get("title") or "").strip()
@@ -2265,20 +2272,34 @@ class MirrorResolver:
                 })
                 rank += 1
 
-        # Concurrent 128 KB byte-range speed probe for top direct HTTP mirrors
+        # Concurrent live verification:
+        # 1. Direct HTTP byte-range probe (drop offline/HTML links completely)
+        # 2. Real-Debrid /unrestrict/check pre-check (drop dead hosters & enrich filenames/sizes)
         probe_candidates = [
             s for s in all_streams
             if s["is_direct"]
             and not s["is_realdebrid"]
             and not s["is_torrent"]
             and str(s["direct_url"]).startswith("http")
-        ][:6]
+        ][:8]
 
-        if probe_candidates:
+        rd_check_candidates = [
+            s for s in all_streams
+            if rd_active
+            and s["is_realdebrid"]
+            and not s["is_torrent"]
+            and str(s["direct_url"]).startswith("http")
+        ][:10]
+
+        dead_urls = set()
+
+        async def _probe_direct_batch():
+            if not probe_candidates:
+                return
             try:
                 probe_results = await asyncio.wait_for(
                     asyncio.gather(*[_probe_direct_speed(s["direct_url"]) for s in probe_candidates], return_exceptions=True),
-                    timeout=2.8,
+                    timeout=3.2,
                 )
                 for s, p_res in zip(probe_candidates, probe_results):
                     if isinstance(p_res, dict) and p_res.get("ok"):
@@ -2287,13 +2308,52 @@ class MirrorResolver:
                         s["latency_ms"] = int(p_res.get("latency_ms") or 9999)
                         if s["file_size_mb"] <= 0 and float(p_res.get("size_mb") or 0.0) > 0:
                             s["file_size_mb"] = float(p_res["size_mb"])
-                    elif isinstance(p_res, dict) and not p_res.get("ok"):
-                        s["is_direct"] = False
-                        s["is_downloadable"] = bool(s["is_realdebrid"] or s["is_torrent"])
-                        s["speed_verified"] = False
-                        s["quality"] = f"{s['quality']} (Unverified)"
+                    elif isinstance(p_res, dict) and p_res.get("ok") is False:
+                        dead_urls.add(s["direct_url"])
             except asyncio.TimeoutError:
                 pass
+
+        async def _check_rd_batch():
+            if not rd_check_candidates:
+                return
+            try:
+                check_results = await asyncio.wait_for(
+                    asyncio.gather(*[check_hoster_link(s["direct_url"]) for s in rd_check_candidates], return_exceptions=True),
+                    timeout=4.0,
+                )
+                for s, c_res in zip(rd_check_candidates, check_results):
+                    if not isinstance(c_res, dict):
+                        continue
+                    st = c_res.get("status")
+                    if st == "dead":
+                        dead_urls.add(s["direct_url"])
+                    elif st == "ok":
+                        s["speed_verified"] = True
+                        fsize = int(c_res.get("filesize") or 0)
+                        if fsize > 0 and s["file_size_mb"] <= 0:
+                            s["file_size_mb"] = round(fsize / (1024 * 1024), 2)
+                        raw_fn = str(c_res.get("filename") or "").strip()
+                        if raw_fn:
+                            leaf = raw_fn.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+                            clean_fn = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", leaf).strip(" .")
+                            if clean_fn:
+                                cur_fn = str(s.get("filename") or "")
+                                if not cur_fn or cur_fn == f"{query}.zip" or "." not in cur_fn:
+                                    s["filename"] = clean_fn
+                                title_low = str(s.get("title") or "").lower()
+                                fn_low = clean_fn.lower()
+                                if any(k in fn_low for k in ("backport", "fix")) and "backport" not in title_low:
+                                    s["title"] = f"{s['title']} [Backport]"
+                                elif re.search(r"\b(dlc|addon|add-on)\b", fn_low) and not re.search(r"\b(dlc|addon|add-on)\b", title_low):
+                                    s["title"] = f"{s['title']} [DLC]"
+                                elif re.search(r"\b(update|patch)\b", fn_low) and not re.search(r"\b(update|patch)\b", title_low):
+                                    s["title"] = f"{s['title']} [Update]"
+            except asyncio.TimeoutError:
+                pass
+
+        await asyncio.gather(_probe_direct_batch(), _check_rd_batch())
+        if dead_urls:
+            all_streams = [s for s in all_streams if s["direct_url"] not in dead_urls]
 
         return _rank_mirrors(all_streams, clean_q, rd_active)
 

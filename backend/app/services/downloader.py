@@ -20,6 +20,28 @@ QUEUE_PAUSED: bool = False
 QUEUE_EVENT: Optional[asyncio.Event] = None
 QUEUE_WORKER_TASK: Optional[asyncio.Task] = None
 
+_FAILED_MIRROR_URLS: Dict[str, float] = {}
+_FAILED_URL_TTL = 1800.0
+
+
+def mark_url_failed(url: str) -> None:
+    clean = (url or "").strip()
+    if clean:
+        _FAILED_MIRROR_URLS[clean] = time.monotonic()
+
+
+def is_url_recently_failed(url: str) -> bool:
+    clean = (url or "").strip()
+    if not clean:
+        return False
+    ts = _FAILED_MIRROR_URLS.get(clean)
+    if ts is None:
+        return False
+    if (time.monotonic() - ts) < _FAILED_URL_TTL:
+        return True
+    _FAILED_MIRROR_URLS.pop(clean, None)
+    return False
+
 VALID_ROM_EXTS = {
     ".sfc", ".smc", ".nes", ".z64", ".n64", ".v64",
     ".gba", ".gb", ".gbc", ".nds", ".dsi", ".iso", ".chd", ".rvz", ".cso", ".gcm",
@@ -715,8 +737,11 @@ async def download_file_worker(
         return
     except Exception as e:
         print(f"[Downloader Error] {orig_url} -> {e}")
-        # AUTOMATIC MIRROR / TORRENT FAILOVER (bounded and deduplicated to prevent infinite retry loops)
-        if failover_depth < 3 and game_title and platform:
+        mark_url_failed(orig_url)
+        if url and url != orig_url:
+            mark_url_failed(url)
+        # AUTOMATIC MIRROR / TORRENT FAILOVER (bounded, deduplicated & Base-Game-first)
+        if failover_depth < 5 and game_title and platform:
             try:
                 state = {
                     "status": "resolving_mirror",
@@ -727,14 +752,21 @@ async def download_file_worker(
                     DOWNLOAD_STATES[download_id].update(state)
                 update_db_download(download_id, state)
                 
-                from .mirror_resolver import mirror_resolver
+                from .mirror_resolver import mirror_resolver, _stream_part_rank
                 mirrors = await mirror_resolver.get_rom_mirrors(game_title, platform)
                 if mirrors:
-                    # 1. Try alternative verified direct mirror not already attempted
+                    # 1. Try alternative verified Base-Game direct mirror not already attempted
                     direct_candidates = [
                         m for m in mirrors
                         if m.get("is_direct") and m.get("direct_url") and m.get("direct_url") not in seen_urls
                     ]
+                    direct_candidates.sort(
+                        key=lambda m: (
+                            _stream_part_rank(m.get("title", ""), m.get("source_name", "")),
+                            not bool(m.get("speed_verified")),
+                            int(m.get("rank") or 999),
+                        )
+                    )
                     if direct_candidates:
                         working_url = direct_candidates[0]["direct_url"]
                         return await download_file_worker(

@@ -2,7 +2,7 @@ import asyncio
 import json
 import time
 import urllib.parse
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 import httpx
 from ..database import get_db_connection
 
@@ -314,6 +314,80 @@ async def verify_and_save_realdebrid_config(
         "message": test_res["message"],
         "config": get_realdebrid_config(),
     }
+
+
+_RD_CHECK_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_RD_CHECK_CACHE_TTL = 300.0
+_RD_DEAD_ERROR_CODES = {16, 19, 24, 30, 35}
+
+
+async def check_hoster_link(url: str) -> Dict[str, Any]:
+    """
+    Lightweight pre-check against Real-Debrid /unrestrict/check (with 5-min cache)
+    to detect offline/dead hoster files before showing or queueing them.
+    """
+    clean_url = (url or "").strip()
+    if not clean_url:
+        return {"status": "unknown"}
+
+    now = time.monotonic()
+    cached = _RD_CHECK_CACHE.get(clean_url)
+    if cached and (now - cached[0]) < _RD_CHECK_CACHE_TTL:
+        return dict(cached[1])
+
+    creds = _get_rd_credentials()
+    if not creds["enabled"]:
+        return {"status": "unknown"}
+    key = creds["api_key"]
+
+    res_out: Dict[str, Any] = {"status": "unknown"}
+    should_cache = False
+    try:
+        async with httpx.AsyncClient(timeout=3.0, verify=False) as client:
+            resp = await client.post(
+                f"{RD_API_BASE}/unrestrict/check",
+                headers={"Authorization": f"Bearer {key}"},
+                data={"link": clean_url},
+            )
+            if resp.status_code == 200:
+                data = resp.json() if resp.content else {}
+                if int(data.get("supported", 1) or 0) == 0:
+                    res_out = {"status": "dead", "reason": "unsupported_hoster"}
+                else:
+                    res_out = {
+                        "status": "ok",
+                        "filename": str(data.get("filename") or "").strip(),
+                        "filesize": int(data.get("filesize") or 0),
+                        "host": str(data.get("host") or "").strip(),
+                    }
+                should_cache = True
+            elif resp.status_code in (400, 404, 410, 503):
+                reason = f"http_{resp.status_code}"
+                try:
+                    err_body = resp.json()
+                    reason = str(err_body.get("error") or reason)
+                    err_code = err_body.get("error_code")
+                    if err_code is not None and int(err_code) in _RD_DEAD_ERROR_CODES:
+                        reason = str(err_body.get("error") or f"error_code_{err_code}")
+                except Exception:
+                    pass
+                res_out = {"status": "dead", "reason": reason}
+                should_cache = True
+            else:
+                try:
+                    err_body = resp.json()
+                    err_code = err_body.get("error_code")
+                    if err_code is not None and int(err_code) in _RD_DEAD_ERROR_CODES:
+                        res_out = {"status": "dead", "reason": str(err_body.get("error") or f"error_code_{err_code}")}
+                        should_cache = True
+                except Exception:
+                    pass
+    except Exception:
+        return {"status": "unknown"}
+
+    if should_cache:
+        _RD_CHECK_CACHE[clean_url] = (now, res_out)
+    return dict(res_out)
 
 
 async def unrestrict_link(url: str) -> Optional[Dict[str, Any]]:
