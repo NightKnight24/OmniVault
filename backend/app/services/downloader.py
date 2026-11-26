@@ -68,7 +68,8 @@ def get_download_headers(url: str) -> Dict[str, str]:
     else:
         try:
             parsed = urllib.parse.urlparse(url)
-            if parsed.scheme and parsed.netloc:
+            host_low = (parsed.netloc or "").lower()
+            if parsed.scheme and parsed.netloc and not host_low.endswith("real-debrid.com"):
                 headers["Referer"] = f"{parsed.scheme}://{parsed.netloc}/"
         except Exception:
             pass
@@ -483,10 +484,16 @@ async def download_file_worker(
     game_title: str = "",
     platform: str = "",
     dest_meta: Optional[Dict[str, Any]] = None,
+    tried_urls: Optional[set] = None,
+    failover_depth: int = 0,
 ):
     temp_path = dest_path.with_suffix(dest_path.suffix + ".part")
     downloaded = 0
     total_size = 0
+    seen_urls = set(tried_urls or ())
+    orig_url = url
+    if orig_url:
+        seen_urls.add(orig_url)
     
     try:
         if not url:
@@ -507,9 +514,12 @@ async def download_file_worker(
             rd_res = await unrestrict_link(url)
             if rd_res and rd_res.get("download"):
                 url = rd_res["download"]
+                seen_urls.add(url)
                 if rd_res.get("filename"):
-                    dest_path = dest_path.parent / rd_res["filename"]
-                    temp_path = dest_path.with_suffix(dest_path.suffix + ".part")
+                    safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", os.path.basename(rd_res["filename"])).strip(" .")
+                    if safe_name:
+                        dest_path = dest_path.parent / safe_name
+                        temp_path = dest_path.with_suffix(dest_path.suffix + ".part")
                 print(f"[Real-Debrid] Unrestricted hoster link -> {dest_path.name}")
 
         # ZERO-LOCAL-DISK DIRECT RAM-TO-CLOUD STREAMING (Google Drive / OneDrive API Mode)
@@ -704,27 +714,46 @@ async def download_file_worker(
             update_db_download(download_id, state)
         return
     except Exception as e:
-        # AUTOMATIC MIRROR / TORRENT FAILOVER
-        if game_title and platform:
+        print(f"[Downloader Error] {orig_url} -> {e}")
+        # AUTOMATIC MIRROR / TORRENT FAILOVER (bounded and deduplicated to prevent infinite retry loops)
+        if failover_depth < 3 and game_title and platform:
             try:
                 state = {
                     "status": "resolving_mirror",
                     "speed": "0 MB/s",
-                    "eta": "Resolving mirror or torrent..."
+                    "eta": "Trying next mirror..."
                 }
-                DOWNLOAD_STATES[download_id].update(state)
+                if download_id in DOWNLOAD_STATES:
+                    DOWNLOAD_STATES[download_id].update(state)
                 update_db_download(download_id, state)
                 
                 from .mirror_resolver import mirror_resolver
                 mirrors = await mirror_resolver.get_rom_mirrors(game_title, platform)
                 if mirrors:
-                    # 1. Try alternative verified direct mirror
-                    direct_candidates = [m for m in mirrors if m.get("is_direct") and m.get("direct_url") != url]
+                    # 1. Try alternative verified direct mirror not already attempted
+                    direct_candidates = [
+                        m for m in mirrors
+                        if m.get("is_direct") and m.get("direct_url") and m.get("direct_url") not in seen_urls
+                    ]
                     if direct_candidates:
                         working_url = direct_candidates[0]["direct_url"]
-                        return await download_file_worker(download_id, working_url, dest_path, game_title=game_title, platform=platform, dest_meta=dest_meta)
-                    # 2. Try BitTorrent magnet mirror
-                    torrent_candidates = [m for m in mirrors if (m.get("direct_url") or "").startswith("magnet:") or (m.get("direct_url") or "").endswith(".torrent")]
+                        return await download_file_worker(
+                            download_id,
+                            working_url,
+                            dest_path,
+                            game_title=game_title,
+                            platform=platform,
+                            dest_meta=dest_meta,
+                            tried_urls=seen_urls,
+                            failover_depth=failover_depth + 1,
+                        )
+                    # 2. Try BitTorrent magnet mirror not already attempted
+                    torrent_candidates = [
+                        m for m in mirrors
+                        if m.get("direct_url")
+                        and m.get("direct_url") not in seen_urls
+                        and (m.get("direct_url", "").startswith("magnet:") or m.get("direct_url", "").endswith(".torrent"))
+                    ]
                     if torrent_candidates:
                         working_magnet = torrent_candidates[0]["direct_url"]
                         return await download_torrent_worker(download_id, working_magnet, dest_path.parent, game_title=game_title, platform=platform, dest_meta=dest_meta)
@@ -733,14 +762,16 @@ async def download_file_worker(
                 
         error_msg = f"{str(e)}"
         if "Primary & Mirror" not in error_msg:
-            error_msg = f"{error_msg} (Verified direct ROM mirror not available for this specific dump. Use BitTorrent / Online Scraper mirrors.)"
+            error_msg = f"{error_msg} — Hoster/CDN unavailable right now; pick another mirror in Download Sources."
             
         error_state = {
             "status": "error",
+            "eta": "Mirror unavailable",
             "error_message": error_msg,
             "speed": "0 MB/s"
         }
-        DOWNLOAD_STATES[download_id].update(error_state)
+        if download_id in DOWNLOAD_STATES:
+            DOWNLOAD_STATES[download_id].update(error_state)
         update_db_download(download_id, error_state)
 
 def update_db_download(download_id: str, fields: Dict[str, Any]):
