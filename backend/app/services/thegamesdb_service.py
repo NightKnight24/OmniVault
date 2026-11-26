@@ -985,6 +985,10 @@ async def sync_platform_from_thegamesdb(
 
     conn.commit()
     conn.close()
+    from ..database import rebuild_fast_catalog_indexes
+    from ..routers.games import invalidate_catalog_meta_cache
+    rebuild_fast_catalog_indexes(force=True)
+    invalidate_catalog_meta_cache()
     return {
         "status": "ok",
         "platform": platform,
@@ -1387,6 +1391,11 @@ async def sync_from_thegamesdb_static_dump(scope: str = "all") -> Dict[str, Any]
     cursor.execute("SELECT COUNT(DISTINCT platform) FROM games")
     total_platforms_in_db = int(cursor.fetchone()[0])
     conn.close()
+
+    from ..database import rebuild_fast_catalog_indexes
+    from ..routers.games import invalidate_catalog_meta_cache
+    rebuild_fast_catalog_indexes(force=True)
+    invalidate_catalog_meta_cache()
 
     synced_plat_codes = sorted(discovered_platforms.keys())
     results = [

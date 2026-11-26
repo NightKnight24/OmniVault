@@ -5,8 +5,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from .database import init_db, get_db_connection, DB_PATH
+from .database import init_db, get_db_connection, ensure_games_extended_columns, rebuild_fast_catalog_indexes, DB_PATH
 from .scrapers.catalog_builder import populate_master_catalog
+from .services.cloud_storage_service import _get_icloud_real_quota_gb
 from .routers import games, scrape, downloads, providers, mirrors, compressor, storage, covers
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
@@ -17,12 +18,17 @@ async def lifespan(app: FastAPI):
     init_db()
     # Populate comprehensive retro catalog across platforms and genres
     populate_master_catalog(DB_PATH)
+    # Build composite SQLite indexes, normalized genre lookup, FTS5 search index & warm caches asynchronously
+    ensure_games_extended_columns()
+    rebuild_fast_catalog_indexes()
+    _get_icloud_real_quota_gb(force_refresh=False)
+    downloads._trigger_installed_refresh_bg()
     yield
 
 app = FastAPI(
     title="OmniVault API",
     description="ROM Finder, Metadata Catalog & Download Manager",
-    version="2.1.2",
+    version="2.1.3",
     lifespan=lifespan
 )
 

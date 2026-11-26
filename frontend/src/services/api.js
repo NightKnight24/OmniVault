@@ -46,22 +46,22 @@ export async function fetchConsoleFamilies() {
   return res.json();
 }
 
-export async function fetchGenres(platform = 'ALL', family = 'ALL') {
+export async function fetchGenres(platform = 'ALL', family = 'ALL', signal = undefined) {
   const query = new URLSearchParams();
   if (platform && platform !== 'ALL') query.set('platform', platform);
   if (family && family !== 'ALL') query.set('family', family);
   const qStr = query.toString() ? `?${query.toString()}` : '';
-  const res = await fetch(`${API_BASE}/games/meta/genres${qStr}`, { cache: 'no-store' });
+  const res = await fetch(`${API_BASE}/games/meta/genres${qStr}`, { cache: 'no-store', signal });
   if (!res.ok) throw new Error('Failed to fetch genres');
   return res.json();
 }
 
-export async function fetchCatalogFilters(platform = 'ALL', family = 'ALL') {
+export async function fetchCatalogFilters(platform = 'ALL', family = 'ALL', signal = undefined) {
   const query = new URLSearchParams();
   if (platform && platform !== 'ALL') query.set('platform', platform);
   if (family && family !== 'ALL') query.set('family', family);
   const qStr = query.toString() ? `?${query.toString()}` : '';
-  const res = await fetch(`${API_BASE}/games/meta/filters${qStr}`, { cache: 'no-store' });
+  const res = await fetch(`${API_BASE}/games/meta/filters${qStr}`, { cache: 'no-store', signal });
   if (!res.ok) throw new Error('Failed to fetch catalog filter facets');
   return res.json();
 }

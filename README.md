@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/Systems-150%2B%20Platforms%20(inc.%20Switch%202%2C%20PS5%2C%20Xbox%20Series%20X%2C%20Win%20%26%20Mac)-purple?style=flat-square" alt="Systems" />
   <a href="https://github.com/NightKnight24/OmniVault/releases"><img src="https://img.shields.io/github/v/release/NightKnight24/OmniVault?label=Release&style=flat-square&color=emerald" alt="Release" /></a>
   <a href="https://github.com/NightKnight24/homebrew-omnivault"><img src="https://img.shields.io/badge/Homebrew-Tap-FBB040?style=flat-square&logo=homebrew&logoColor=black" alt="Homebrew Tap" /></a>
-  <a href="https://github.com/NightKnight24/OmniVault/pkgs/container/omnivault"><img src="https://img.shields.io/badge/GHCR-Docker%202.1.2-2496ED?style=flat-square&logo=docker&logoColor=white" alt="GHCR Package" /></a>
+  <a href="https://github.com/NightKnight24/OmniVault/pkgs/container/omnivault"><img src="https://img.shields.io/badge/GHCR-Docker%202.1.3-2496ED?style=flat-square&logo=docker&logoColor=white" alt="GHCR Package" /></a>
   <img src="https://img.shields.io/badge/Architecture-100%25%20BYOS-emerald?style=flat-square" alt="BYOS" />
   <img src="https://img.shields.io/badge/License-MIT-emerald?style=flat-square" alt="License" />
 </p>
@@ -44,7 +44,7 @@ brew install --cask omnivault
 
 ### Option B: Download Pre-compiled App (Zero Setup)
 Download the standalone native macOS Apple Silicon app from **[GitHub Releases](https://github.com/NightKnight24/OmniVault/releases/latest)**:
-1. Download **`OmniVault-v2.1.2-macOS-arm64.zip`**.
+1. Download **`OmniVault-v2.1.3-macOS-arm64.zip`**.
 2. Unzip and drag `OmniVault.app` into `/Applications` (or `/Volumes/ROMS`).
 3. Double-click to launch!
 

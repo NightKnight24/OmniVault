@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.parse
 import webbrowser
@@ -67,7 +68,7 @@ CLOUD_TARGET_IDS = ("icloud", "gdrive", "onedrive", "webdav")
 
 # Ephemeral PKCE state store (in-memory only, never persisted to git)
 _PENDING_OAUTH_STATES: Dict[str, Dict[str, Any]] = {}
-_ICLOUD_QUOTA_CACHE: Dict[str, Any] = {"ts": 0.0, "ttl": 0.0, "free_gb": None}
+_ICLOUD_QUOTA_CACHE: Dict[str, Any] = {"ts": 0.0, "ttl": 0.0, "free_gb": None, "refreshing": False}
 
 
 def sanitize_console_folder_name(platform: str) -> str:
@@ -188,13 +189,7 @@ def _safe_disk_free_gb(target: Path) -> float:
         return 0.0
 
 
-def _get_icloud_real_quota_gb(force_refresh: bool = False) -> Optional[float]:
-    """Queries actual remote iCloud remaining quota via macOS `/usr/bin/brctl quota` instead of local SSD free space."""
-    if sys.platform != "darwin" or not Path("/usr/bin/brctl").exists():
-        return None
-    now = time.monotonic()
-    if not force_refresh and (now - _ICLOUD_QUOTA_CACHE["ts"]) < _ICLOUD_QUOTA_CACHE.get("ttl", 0.0):
-        return _ICLOUD_QUOTA_CACHE["free_gb"]
+def _fetch_icloud_quota_sync() -> Optional[float]:
     free_gb: Optional[float] = None
     try:
         clean_env = {k: v for k, v in os.environ.items() if not k.startswith(("DYLD_", "PYTHON"))}
@@ -211,10 +206,26 @@ def _get_icloud_real_quota_gb(force_refresh: bool = False) -> Optional[float]:
             free_gb = round(int(m.group(1)) / (1024 ** 3), 2)
     except Exception:
         free_gb = None
-    _ICLOUD_QUOTA_CACHE["ts"] = now
-    _ICLOUD_QUOTA_CACHE["ttl"] = 60.0 if free_gb is not None else 5.0
+    _ICLOUD_QUOTA_CACHE["ts"] = time.monotonic()
+    _ICLOUD_QUOTA_CACHE["ttl"] = 60.0 if free_gb is not None else 10.0
     _ICLOUD_QUOTA_CACHE["free_gb"] = free_gb
+    _ICLOUD_QUOTA_CACHE["refreshing"] = False
     return free_gb
+
+
+def _get_icloud_real_quota_gb(force_refresh: bool = False) -> Optional[float]:
+    """Queries actual remote iCloud remaining quota via macOS `/usr/bin/brctl quota` non-blockingly unless forced."""
+    if sys.platform != "darwin" or not Path("/usr/bin/brctl").exists():
+        return None
+    if force_refresh:
+        return _fetch_icloud_quota_sync()
+    now = time.monotonic()
+    if (now - _ICLOUD_QUOTA_CACHE["ts"]) < _ICLOUD_QUOTA_CACHE.get("ttl", 0.0):
+        return _ICLOUD_QUOTA_CACHE["free_gb"]
+    if not _ICLOUD_QUOTA_CACHE.get("refreshing"):
+        _ICLOUD_QUOTA_CACHE["refreshing"] = True
+        threading.Thread(target=_fetch_icloud_quota_sync, daemon=True).start()
+    return _ICLOUD_QUOTA_CACHE["free_gb"]
 
 
 def _pick_writable_subdir(base_dir: Path) -> Optional[Path]:

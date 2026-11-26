@@ -71,11 +71,14 @@ export default function App() {
   // Request cancellation & ordering guards
   const gamesAbortRef = useRef(null);
   const gamesReqSeqRef = useRef(0);
+  const facetsAbortRef = useRef(null);
+  const facetsReqSeqRef = useRef(0);
+  const prevDownloadsRef = useRef([]);
 
   useEffect(() => {
     const t = setTimeout(() => {
       setDebouncedSearch(searchTerm);
-    }, 180);
+    }, 100);
     return () => clearTimeout(t);
   }, [searchTerm]);
 
@@ -193,14 +196,22 @@ export default function App() {
   }, []);
 
   const loadGenresAndFacets = useCallback(async () => {
+    if (facetsAbortRef.current) {
+      facetsAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    facetsAbortRef.current = controller;
+    const reqId = ++facetsReqSeqRef.current;
     try {
       const [genresRes, filtersRes] = await Promise.all([
-        fetchGenres(selectedPlatform, selectedFamily),
-        fetchCatalogFilters(selectedPlatform, selectedFamily),
+        fetchGenres(selectedPlatform, selectedFamily, controller.signal),
+        fetchCatalogFilters(selectedPlatform, selectedFamily, controller.signal),
       ]);
+      if (reqId !== facetsReqSeqRef.current) return;
       setGenres(genresRes || []);
       setCatalogFilters(filtersRes || {});
     } catch (err) {
+      if (err?.name === 'AbortError') return;
       console.error('Failed to load genres & filter facets:', err);
     }
   }, [selectedPlatform, selectedFamily]);
@@ -208,12 +219,21 @@ export default function App() {
   const loadDownloads = useCallback(async () => {
     try {
       const data = await fetchDownloads();
-      setDownloads(data.downloads || []);
+      const nextList = data.downloads || [];
+      const prevCompleted = new Set(
+        (prevDownloadsRef.current || []).filter(d => d.status === 'completed').map(d => d.id)
+      );
+      const hasNewlyCompleted = nextList.some(d => d.status === 'completed' && !prevCompleted.has(d.id));
+      prevDownloadsRef.current = nextList;
+      setDownloads(nextList);
       if (data.queue) setQueueStatus(data.queue);
+      if (hasNewlyCompleted && prevCompleted.size > 0) {
+        loadInstalledCount(true);
+      }
     } catch (err) {
       console.error('Failed to load downloads:', err);
     }
-  }, []);
+  }, [loadInstalledCount]);
 
   const loadInstalledCount = useCallback(async (forceRefresh = false) => {
     try {
@@ -353,19 +373,12 @@ export default function App() {
   );
 
   useEffect(() => {
-    const pollInterval = (activeDownloads.length > 0 || isDownloadsOpen) ? 1200 : 3000;
+    const pollInterval = (activeDownloads.length > 0 || isDownloadsOpen) ? 1200 : 8000;
     const interval = setInterval(() => {
       loadDownloads();
     }, pollInterval);
     return () => clearInterval(interval);
   }, [activeDownloads.length, isDownloadsOpen, loadDownloads]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      loadInstalledCount();
-    }, 15000);
-    return () => clearInterval(interval);
-  }, [loadInstalledCount]);
 
   const handleStartDownload = async (
     game,
@@ -477,6 +490,7 @@ export default function App() {
         onSelectView={(v) => {
           setCurrentView(v);
           setPage(1);
+          if (v === 'downloaded') loadInstalledCount(true);
         }}
         installedCount={installedCount}
         favoritesCount={favoritesCount}

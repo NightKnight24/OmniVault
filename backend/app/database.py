@@ -52,6 +52,9 @@ def get_db_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=60.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 60000;")
+    conn.execute("PRAGMA temp_store = MEMORY;")
+    conn.execute("PRAGMA cache_size = -32768;")
+    conn.execute("PRAGMA mmap_size = 268435456;")
     return conn
 
 def init_db():
@@ -257,7 +260,16 @@ def init_db():
     conn.close()
 
 
-def ensure_games_extended_columns(conn: Optional[sqlite3.Connection] = None) -> None:
+_EXTENDED_SCHEMA_READY_PATH: Optional[str] = None
+_FTS5_AVAILABLE: Optional[bool] = None
+
+
+def ensure_games_extended_columns(conn: Optional[sqlite3.Connection] = None, force: bool = False) -> None:
+    global _EXTENDED_SCHEMA_READY_PATH, _FTS5_AVAILABLE
+    db_key = str(DB_PATH)
+    if not force and conn is None and _EXTENDED_SCHEMA_READY_PATH == db_key:
+        return
+
     own_conn = conn is None
     if own_conn:
         conn = get_db_connection()
@@ -278,12 +290,127 @@ def ensure_games_extended_columns(conn: Optional[sqlite3.Connection] = None) -> 
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_platform ON games(platform);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_genre ON games(genre);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_rating ON games(rating DESC, rating_count DESC);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_rating_full ON games(rating DESC, rating_count DESC, title ASC);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_platform_rating ON games(platform, rating DESC, rating_count DESC, title ASC);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_platform_title ON games(platform, title ASC);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_platform_year ON games(platform, release_year DESC, title ASC);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_platform_dev ON games(platform, developer);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_platform_pub ON games(platform, publisher);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_platform_esrb ON games(platform, esrb_rating);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_title ON games(title);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_featured ON games(is_featured);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_year ON games(release_year DESC);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_developer ON games(developer);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_publisher ON games(publisher);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_games_esrb ON games(esrb_rating);")
+
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS game_genres (
+            genre TEXT NOT NULL,
+            game_id TEXT NOT NULL,
+            PRIMARY KEY (genre, game_id)
+        ) WITHOUT ROWID;
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_game_genres_game_id ON game_genres(game_id);")
+
+        try:
+            cursor.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS games_fts USING fts5(
+                game_id UNINDEXED,
+                title,
+                alternates,
+                developer,
+                publisher,
+                tokenize='unicode61 remove_diacritics 2'
+            );
+            """)
+            _FTS5_AVAILABLE = True
+        except Exception as fts_exc:
+            _FTS5_AVAILABLE = False
+            print(f"[Database FTS5 Fallback Note]: {fts_exc}")
+
+        if own_conn:
+            conn.commit()
+        _EXTENDED_SCHEMA_READY_PATH = db_key
+    finally:
+        if own_conn and conn is not None:
+            conn.close()
+
+
+def rebuild_fast_catalog_indexes(conn: Optional[sqlite3.Connection] = None, force: bool = False) -> None:
+    """Populates the normalized `game_genres` table and FTS5 `games_fts` index for sub-10ms filtering and search."""
+    ensure_games_extended_columns(conn=conn, force=force)
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM games")
+        game_count = int(cursor.fetchone()[0] or 0)
+
+        if not force:
+            cursor.execute("SELECT value FROM settings WHERE key = 'fast_index_game_count'")
+            row = cursor.fetchone()
+            stored_count = int(row[0]) if row and str(row[0]).isdigit() else -1
+            if stored_count == game_count:
+                if game_count == 0:
+                    return
+                cursor.execute("SELECT 1 FROM game_genres LIMIT 1")
+                has_gg = cursor.fetchone() is not None
+                has_fts = True
+                if _FTS5_AVAILABLE:
+                    try:
+                        cursor.execute("SELECT 1 FROM games_fts LIMIT 1")
+                        has_fts = cursor.fetchone() is not None
+                    except Exception:
+                        has_fts = True
+                if has_gg and has_fts:
+                    return
+
+        cursor.execute("DELETE FROM game_genres")
+        if game_count > 0:
+            cursor.execute("SELECT id, genre, genres_list FROM games")
+            batch: List[tuple] = []
+            for gid, raw_genre, raw_glist in cursor.fetchall():
+                glist_str = str(raw_glist or "").strip()
+                if glist_str:
+                    tags = {t.strip() for t in glist_str.split("|") if t.strip()}
+                elif raw_genre:
+                    tags = {str(raw_genre).strip()}
+                else:
+                    tags = set()
+                for tag in tags:
+                    if tag and tag != "Uncategorized":
+                        batch.append((tag, gid))
+                if len(batch) >= 25000:
+                    cursor.executemany(
+                        "INSERT OR IGNORE INTO game_genres (genre, game_id) VALUES (?, ?)",
+                        batch,
+                    )
+                    batch.clear()
+            if batch:
+                cursor.executemany(
+                    "INSERT OR IGNORE INTO game_genres (genre, game_id) VALUES (?, ?)",
+                    batch,
+                )
+
+        if _FTS5_AVAILABLE:
+            try:
+                cursor.execute("DELETE FROM games_fts")
+                if game_count > 0:
+                    cursor.execute("""
+                    INSERT INTO games_fts(game_id, title, alternates, developer, publisher)
+                    SELECT id, COALESCE(title, ''), COALESCE(alternates, ''), COALESCE(developer, ''), COALESCE(publisher, '')
+                    FROM games
+                    """)
+            except Exception as fts_pop_exc:
+                print(f"[Database FTS5 Populate Note]: {fts_pop_exc}")
+
+        cursor.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('fast_index_game_count', ?)",
+            (str(game_count),),
+        )
+        cursor.execute("ANALYZE;")
         if own_conn:
             conn.commit()
     finally:

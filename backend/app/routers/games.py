@@ -105,9 +105,82 @@ def _resolve_family_platforms(cursor, fam_id: str) -> List[str]:
 
 router = APIRouter(prefix="/api/games", tags=["games"])
 
+_META_CACHE: Dict[str, Any] = {}
+_PLATFORM_CANONICAL_MAP: Dict[str, str] = {}
+_GENRE_CANONICAL_MAP: Dict[str, str] = {}
+
+
+def invalidate_catalog_meta_cache() -> None:
+    _META_CACHE.clear()
+    _PLATFORM_CANONICAL_MAP.clear()
+    _GENRE_CANONICAL_MAP.clear()
+
+
+def _resolve_canonical_platform(cursor, platform: str) -> str:
+    clean = (platform or "").strip()
+    if not clean:
+        return clean
+    if not _PLATFORM_CANONICAL_MAP:
+        cursor.execute("SELECT DISTINCT platform FROM games")
+        for (p,) in cursor.fetchall():
+            if p:
+                _PLATFORM_CANONICAL_MAP[p.lower()] = p
+    return _PLATFORM_CANONICAL_MAP.get(clean.lower(), clean)
+
+
+def _has_game_genres(cursor) -> bool:
+    cached = _META_CACHE.get("_has_game_genres")
+    if cached is not None:
+        return bool(cached)
+    try:
+        cursor.execute("SELECT 1 FROM game_genres LIMIT 1")
+        has_it = cursor.fetchone() is not None
+    except Exception:
+        has_it = False
+    _META_CACHE["_has_game_genres"] = has_it
+    return has_it
+
+
+def _resolve_canonical_genre(cursor, genre_str: str) -> str:
+    clean = (genre_str or "").strip()
+    if not clean:
+        return clean
+    if not _GENRE_CANONICAL_MAP:
+        try:
+            cursor.execute("SELECT DISTINCT genre FROM game_genres")
+            for (g,) in cursor.fetchall():
+                if g:
+                    _GENRE_CANONICAL_MAP[g.lower()] = g
+        except Exception:
+            pass
+    return _GENRE_CANONICAL_MAP.get(clean.lower(), clean)
+
+
+def _has_games_fts(cursor) -> bool:
+    cached = _META_CACHE.get("_has_games_fts")
+    if cached is not None:
+        return bool(cached)
+    try:
+        cursor.execute("SELECT 1 FROM games_fts LIMIT 1")
+        has_it = cursor.fetchone() is not None
+    except Exception:
+        has_it = False
+    _META_CACHE["_has_games_fts"] = has_it
+    return has_it
+
+
+def _build_fts5_match_query(search_str: str) -> Optional[str]:
+    tokens = re.findall(r"[^\W_]+", search_str or "", flags=re.UNICODE)
+    if not tokens:
+        return None
+    return " ".join(f'"{t}"*' for t in tokens[:8])
+
 
 @router.get("/meta/families")
 def get_console_families():
+    cached = _META_CACHE.get("families")
+    if cached is not None:
+        return cached
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -129,11 +202,15 @@ def get_console_families():
             "total_games": total_games,
         })
     conn.close()
+    _META_CACHE["families"] = families_out
     return families_out
 
 
 @router.get("/meta/platforms")
 def get_platforms():
+    cached = _META_CACHE.get("platforms")
+    if cached is not None:
+        return cached
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -155,6 +232,7 @@ def get_platforms():
         code = r["platform"]
         if not code:
             continue
+        _PLATFORM_CANONICAL_MAP[code.lower()] = code
         fam_id = plat_to_fam.get(code.lower(), "computers_mobile")
         out.append({
             "platform": code,
@@ -162,13 +240,15 @@ def get_platforms():
             "game_count": r["game_count"],
             "family": fam_id,
         })
+    _META_CACHE["platforms"] = out
     return out
 
 
 def _build_scope_where(cursor, platform: Optional[str], family: Optional[str], alias: str = "") -> tuple:
     prefix = f"{alias}." if alias else ""
     if platform and isinstance(platform, str) and platform.upper() != "ALL":
-        return f" AND LOWER({prefix}platform) = LOWER(?)", [platform.strip()]
+        canon = _resolve_canonical_platform(cursor, platform)
+        return f" AND {prefix}platform = ?", [canon]
     if family and isinstance(family, str) and family.lower() in CONSOLE_FAMILIES:
         fam_plats = _resolve_family_platforms(cursor, family.lower())
         if fam_plats:
@@ -179,9 +259,43 @@ def _build_scope_where(cursor, platform: Optional[str], family: Optional[str], a
 
 @router.get("/meta/genres")
 def get_genres(platform: Optional[str] = Query(None), family: Optional[str] = Query(None)):
+    cache_key = ("genres", (platform or "ALL").strip().lower(), (family or "ALL").strip().lower())
+    cached = _META_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     ensure_games_extended_columns()
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    if _has_game_genres(cursor):
+        scope_sql, scope_params = _build_scope_where(cursor, platform, family, alias="g")
+        if scope_sql:
+            cursor.execute(
+                f"""
+                SELECT gg.genre as name, COUNT(*) as count
+                FROM game_genres gg
+                INNER JOIN games g ON g.id = gg.game_id
+                WHERE 1=1 {scope_sql}
+                GROUP BY gg.genre
+                ORDER BY count DESC, name ASC
+                """,
+                scope_params,
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT genre as name, COUNT(*) as count
+                FROM game_genres
+                GROUP BY genre
+                ORDER BY count DESC, name ASC
+                """
+            )
+        res = [{"name": r["name"], "count": int(r["count"] or 0)} for r in cursor.fetchall() if int(r["count"] or 0) > 0]
+        conn.close()
+        _META_CACHE[cache_key] = res
+        return res
+
     scope_sql, scope_params = _build_scope_where(cursor, platform, family)
     cursor.execute(
         f"""
@@ -207,12 +321,19 @@ def get_genres(platform: Optional[str] = Query(None), family: Optional[str] = Qu
                 counts[t] = counts.get(t, 0) + c
     conn.close()
     sorted_genres = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
-    return [{"name": name, "count": cnt} for name, cnt in sorted_genres if cnt > 0]
+    res = [{"name": name, "count": cnt} for name, cnt in sorted_genres if cnt > 0]
+    _META_CACHE[cache_key] = res
+    return res
 
 
 @router.get("/meta/filters")
 def get_catalog_filters(platform: Optional[str] = Query(None), family: Optional[str] = Query(None)):
     """Returns rich TheGamesDB metadata filter facets (developers, publishers, ESRB ratings, decades, multiplayer)."""
+    cache_key = ("filters", (platform or "ALL").strip().lower(), (family or "ALL").strip().lower())
+    cached = _META_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     ensure_games_extended_columns()
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -275,13 +396,15 @@ def get_catalog_filters(platform: Optional[str] = Query(None), family: Optional[
     coop_count = int(cursor.fetchone()[0] or 0)
 
     conn.close()
-    return {
+    res = {
         "developers": developers,
         "publishers": publishers,
         "esrb_ratings": esrb_ratings,
         "decades": decades,
         "coop_count": coop_count,
     }
+    _META_CACHE[cache_key] = res
+    return res
 
 
 def _append_game_filters(
@@ -310,24 +433,30 @@ def _append_game_filters(
 
     if genre and isinstance(genre, str) and genre.upper() != "ALL":
         g_clean = genre.strip()
-        if g_clean.lower() == "survival horror":
-            clauses.append("(g.genre IN ('Survival Horror', 'Horror') OR g.genres_list LIKE '%|Horror|%' OR g.genres_list LIKE '%|Survival Horror|%')")
+        if _has_game_genres(cursor):
+            if g_clean.lower() == "survival horror":
+                clauses.append("EXISTS (SELECT 1 FROM game_genres gg WHERE gg.game_id = g.id AND gg.genre IN ('Survival Horror', 'Horror'))")
+            else:
+                canon_g = _resolve_canonical_genre(cursor, g_clean)
+                clauses.append("EXISTS (SELECT 1 FROM game_genres gg WHERE gg.game_id = g.id AND gg.genre = ?)")
+                params.append(canon_g)
         else:
-            clauses.append("(LOWER(g.genre) = LOWER(?) OR LOWER(g.genres_list) LIKE LOWER(?))")
-            params.extend([g_clean, f"%|{g_clean}|%"])
+            if g_clean.lower() == "survival horror":
+                clauses.append("(g.genre IN ('Survival Horror', 'Horror') OR g.genres_list LIKE '%|Horror|%' OR g.genres_list LIKE '%|Survival Horror|%')")
+            else:
+                clauses.append("(LOWER(g.genre) = LOWER(?) OR LOWER(g.genres_list) LIKE LOWER(?))")
+                params.extend([g_clean, f"%|{g_clean}|%"])
 
     if developer and isinstance(developer, str) and developer.upper() != "ALL":
-        d_clean = developer.strip()
-        clauses.append("(LOWER(g.developer) = LOWER(?) OR LOWER(g.developer) LIKE LOWER(?))")
-        params.extend([d_clean, f"%{d_clean}%"])
+        clauses.append("g.developer = ?")
+        params.append(developer.strip())
 
     if publisher and isinstance(publisher, str) and publisher.upper() != "ALL":
-        p_clean = publisher.strip()
-        clauses.append("(LOWER(g.publisher) = LOWER(?) OR LOWER(g.publisher) LIKE LOWER(?))")
-        params.extend([p_clean, f"%{p_clean}%"])
+        clauses.append("g.publisher = ?")
+        params.append(publisher.strip())
 
     if esrb and isinstance(esrb, str) and esrb.upper() != "ALL":
-        clauses.append("LOWER(g.esrb_rating) = LOWER(?)")
+        clauses.append("g.esrb_rating = ?")
         params.append(esrb.strip())
 
     if players and isinstance(players, str) and players.upper() != "ALL":
@@ -354,11 +483,14 @@ def _append_game_filters(
 
     if search and isinstance(search, str) and search.strip():
         q = search.strip()
-        like_q = f"%{q}%"
-        clauses.append(
-            "(g.title LIKE ? OR g.alternates LIKE ? OR g.developer LIKE ? OR g.publisher LIKE ? OR g.description LIKE ?)"
-        )
-        params.extend([like_q, like_q, like_q, like_q, like_q])
+        fts_q = _build_fts5_match_query(q)
+        if fts_q and _has_games_fts(cursor):
+            clauses.append("g.id IN (SELECT game_id FROM games_fts WHERE games_fts MATCH ?)")
+            params.append(fts_q)
+        else:
+            like_q = f"%{q}%"
+            clauses.append("(g.title LIKE ? OR g.alternates LIKE ? OR g.developer LIKE ? OR g.publisher LIKE ?)")
+            params.extend([like_q, like_q, like_q, like_q])
 
     if isinstance(featured_only, bool) and featured_only:
         clauses.append("g.is_featured = 1")
@@ -459,12 +591,15 @@ def list_games(
     rows = cursor.fetchall()
     games = [row_to_game_dict(r) for r in rows]
 
-    count_query = f"""
-    SELECT COUNT(*)
-    FROM games g
-    LEFT JOIN favorites f ON g.id = f.game_id
-    WHERE 1=1{where_sql}
-    """
+    if isinstance(favorites_only, bool) and favorites_only:
+        count_query = f"""
+        SELECT COUNT(*)
+        FROM games g
+        INNER JOIN favorites f ON g.id = f.game_id
+        WHERE 1=1{where_sql}
+        """
+    else:
+        count_query = f"SELECT COUNT(*) FROM games g WHERE 1=1{where_sql}"
     cursor.execute(count_query, filter_params)
     total_count = cursor.fetchone()[0]
     total_pages = max(1, math.ceil(total_count / safe_size))

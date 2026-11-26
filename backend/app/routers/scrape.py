@@ -159,6 +159,10 @@ def import_game_to_vault(game: Dict[str, Any] = Body(...)):
     ))
     conn.commit()
     conn.close()
+    from ..database import rebuild_fast_catalog_indexes
+    from .games import invalidate_catalog_meta_cache
+    rebuild_fast_catalog_indexes(force=True)
+    invalidate_catalog_meta_cache()
     return {"status": "success", "game_id": game_id}
 
 @router.post("/populate-all")
@@ -260,6 +264,11 @@ async def scan_local_collection():
 
     conn.commit()
     conn.close()
+    if new_imported > 0:
+        from ..database import rebuild_fast_catalog_indexes
+        from .games import invalidate_catalog_meta_cache
+        rebuild_fast_catalog_indexes(force=True)
+        invalidate_catalog_meta_cache()
 
     return {
         "status": "success",

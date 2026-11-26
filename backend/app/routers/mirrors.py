@@ -320,6 +320,11 @@ async def import_and_download(payload: Dict[str, Any] = Body(...)):
         )
     conn.commit()
     conn.close()
+    if not existing:
+        from ..database import rebuild_fast_catalog_indexes
+        from .games import invalidate_catalog_meta_cache
+        rebuild_fast_catalog_indexes(force=True)
+        invalidate_catalog_meta_cache()
 
     effective_type = "torrent" if is_torrent else "direct"
     try:
