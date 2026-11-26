@@ -216,6 +216,15 @@ export default function App() {
     }
   }, [selectedPlatform, selectedFamily]);
 
+  const loadInstalledCount = useCallback(async (forceRefresh = false) => {
+    try {
+      const res = await fetchInstalledGames(forceRefresh);
+      setInstalledCount((res.installed || []).length);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const loadDownloads = useCallback(async () => {
     try {
       const data = await fetchDownloads();
@@ -234,15 +243,6 @@ export default function App() {
       console.error('Failed to load downloads:', err);
     }
   }, [loadInstalledCount]);
-
-  const loadInstalledCount = useCallback(async (forceRefresh = false) => {
-    try {
-      const res = await fetchInstalledGames(forceRefresh);
-      setInstalledCount((res.installed || []).length);
-    } catch {
-      // ignore
-    }
-  }, []);
 
   const handleToggleFavorite = async (game) => {
     try {
