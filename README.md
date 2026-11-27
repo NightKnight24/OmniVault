@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/Systems-150%2B%20Platforms%20(inc.%20Switch%202%2C%20PS5%2C%20Xbox%20Series%20X%2C%20Win%20%26%20Mac)-purple?style=flat-square" alt="Systems" />
   <a href="https://github.com/NightKnight24/OmniVault/releases"><img src="https://img.shields.io/github/v/release/NightKnight24/OmniVault?label=Release&style=flat-square&color=emerald" alt="Release" /></a>
   <a href="https://github.com/NightKnight24/homebrew-omnivault"><img src="https://img.shields.io/badge/Homebrew-Tap-FBB040?style=flat-square&logo=homebrew&logoColor=black" alt="Homebrew Tap" /></a>
-  <a href="https://github.com/NightKnight24/OmniVault/pkgs/container/omnivault"><img src="https://img.shields.io/badge/GHCR-Docker%202.1.6-2496ED?style=flat-square&logo=docker&logoColor=white" alt="GHCR Package" /></a>
+  <a href="https://github.com/NightKnight24/OmniVault/pkgs/container/omnivault"><img src="https://img.shields.io/badge/GHCR-Docker%202.1.7-2496ED?style=flat-square&logo=docker&logoColor=white" alt="GHCR Package" /></a>
   <img src="https://img.shields.io/badge/Architecture-100%25%20BYOS-emerald?style=flat-square" alt="BYOS" />
   <img src="https://img.shields.io/badge/License-MIT-emerald?style=flat-square" alt="License" />
 </p>
@@ -24,7 +24,7 @@
 ## 🌟 Highlights
 
 - **Full 150+ System TheGamesDB Catalog & Metadata Organizer**: 1-click **Resync Catalog** downloads all games across **150+ consoles, handhelds, computers & modern platforms** (**PS5**, **Nintendo Switch 2**, **Xbox Series X/S**, **Xbox One**, **Windows**, **macOS**, **Amiga**, **3DO**, classic 8/16/32/64-bit consoles & arcade) with all **30 categories/genres**, **8,700+ developers**, **4,700+ publishers**, **ESRB age ratings**, **multiplayer & co-op filters**, release eras, verified front box art, 1080p fanart backdrops, and screenshots — using `0` API quota calls *(zero copyrighted ROM files bundled)*.
-- **Cloud Sign-In & Zero-Local-Disk Direct Streaming (`iCloud Drive` • `Google Drive` • `OneDrive` • `WebDAV Cloud / NAS`)**: Connect your cloud drive via **1-click System / Desktop App Sign-In** (real iCloud quota readout + Google Drive Stream / OneDrive Files On-Demand), **WebDAV Cloud / NAS** (pCloud, Nextcloud, Koofr, Box, Synology NAS with zero API keys), or **OAuth 2.0 PKCE Browser "Sign in & Allow"** — streaming ROMs and Real-Debrid downloads straight through RAM into dedicated **`OmniVault/ROMs/<Console>/`** folders with **zero bytes written to your local drive**.
+- **Cloud Sign-In & Zero-Local-Disk Direct Streaming (`iCloud Drive` • `Google Drive` • `OneDrive` • `WebDAV Cloud / NAS`)**: Connect your cloud drive via **1-Click 0-Disk Sign-In (`rclone`)** (no Google Cloud Console, no developer keys — just click Allow in Chrome), **1-click System / Desktop App Sign-In** (real iCloud quota readout + Google Drive Stream / OneDrive Files On-Demand with `fileproviderctl` auto-offload), **WebDAV Cloud / NAS** (pCloud, Nextcloud, Koofr, Box, Synology NAS with zero API keys), or **custom OAuth 2.0 PKCE Browser Sign-In** — streaming ROMs and Real-Debrid downloads straight through RAM into dedicated **`OmniVault/ROMs/<Console>/`** folders with **zero bytes written to your local drive**.
 - **100% In-App Community Scrapers with Exact-Game Filtering**: Clicking any configured community source scrapes & queues downloads **directly inside OmniVault** (never opening external browser windows), with strict whole-word title normalization, Roman numeral & acronym resolution, sequel isolation, and Base/Update/DLC/Backport classification.
 - **Inline Trailers & Gameplay Previews**: Watch game trailers and gameplay directly inside each game's detail showcase alongside box art, screenshots, and synopses.
 - **Instant Filtering & 1-Click Resync**: Indexed SQLite queries (`<15ms`), abortable debounced filtering, `no-store` cache control, and toolbar **Refresh** + **Resync Catalog** buttons.
@@ -44,7 +44,7 @@ brew install --cask omnivault
 
 ### Option B: Download Pre-compiled App (Zero Setup)
 Download the standalone native macOS Apple Silicon app from **[GitHub Releases](https://github.com/NightKnight24/OmniVault/releases/latest)**:
-1. Download **`OmniVault-v2.1.6-macOS-arm64.zip`**.
+1. Download **`OmniVault-v2.1.7-macOS-arm64.zip`**.
 2. Unzip and drag `OmniVault.app` into `/Applications` (or `/Volumes/ROMS`).
 3. Double-click to launch!
 
@@ -73,12 +73,14 @@ open /Volumes/ROMS/OmniVault.app
 
 Every cloud download is automatically organized into its own dedicated console folder under **`OmniVault/ROMs/<Console>/`** (for example, `OmniVault/ROMs/SNES/`, `OmniVault/ROMs/PS5/`, `OmniVault/ROMs/Switch2/`):
 
-1. **1-Click Browser "Sign in & Allow" (OAuth 2.0 Loopback + PKCE — Zero Local Disk Usage)**:
-   - Open **Settings → Storage & Downloads → Cloud Drive Destinations** for **Google Drive** or **OneDrive**, enter your free public Desktop OAuth Client ID once (no client secret needed with PKCE; zero Google/Microsoft keys are ever bundled in GitHub), and click **Browser Sign-In**.
-   - Click **Allow** in your browser — OmniVault catches the loopback callback at `127.0.0.1:19842` and enables **Direct Cloud Streaming**, piping HTTP & Real-Debrid downloads straight through an 8–10 MB RAM buffer into `OmniVault/ROMs/<Console>/` with **0 bytes written to your local drive**.
-2. **1-Click System & Desktop App Sign-In (`iCloud Drive`, `Google Drive`, `OneDrive`)**:
+1. **1-Click 0-Disk Sign-In (`rclone` RAM-Pipe — Zero Developer Console, Zero Local Disk Usage)**:
+   - Open **Settings → Storage & Downloads → Cloud Drive Destinations** for **Google Drive** or **OneDrive** and click **1-Click 0-Disk Sign-In** (powered by local `rclone`).
+   - Sign in normally in Chrome and click **Allow** (no Google Cloud Console, no Microsoft Entra portal, zero keys bundled in GitHub) — OmniVault pipes HTTP & Real-Debrid downloads straight through a 128 KB RAM stream into `OmniVault/ROMs/<Console>/` via `rclone rcat` with **0 bytes written to your local drive**.
+2. **Optional Custom OAuth 2.0 Loopback + PKCE Browser Sign-In**:
+   - Or expand **Options** on Google Drive / OneDrive to paste your own OAuth Client ID and click **Browser Sign-In** (`127.0.0.1:19842` callback).
+3. **1-Click System & Desktop App Sign-In (`iCloud Drive`, `Google Drive`, `OneDrive`)**:
    - Click **Sign in to iCloud** (opens macOS Apple Account / iCloud Settings) or **Sign in (GDrive / OneDrive App)** to connect via native cloud mounts (`~/Library/Mobile Documents/com~apple~CloudDocs` and `~/Library/CloudStorage/*`).
-   - Enable **Cloud-Only Mode (Offload local copy after sync)** to automatically evict local blocks via macOS `brctl evict` once uploaded.
+   - Enable **Cloud-Only Mode / Offload local sync copy** to automatically evict local blocks via macOS `brctl evict` (iCloud) and `fileproviderctl evict` (Google Drive / OneDrive) once uploaded.
 
 ---
 

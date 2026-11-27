@@ -16,7 +16,8 @@ import {
   fetchStorageConfig, saveStorageConfig, applyQuickSetup,
   browseDirectory, revealStorageFolder,
   fetchCloudTargets, saveCloudTargets, testCloudTarget,
-  startCloudOAuth, openCloudSystemSignIn
+  startCloudOAuth, openCloudSystemSignIn,
+  startCloudRcloneSignIn, fetchCloudRcloneStatus
 } from '../services/api';
 import { playClick, playVictorySound } from '../utils/soundEffects';
 
@@ -145,8 +146,8 @@ export default function UnifiedSettingsModal({
   const [cloudConfig, setCloudConfig] = useState({ default_target: 'local', targets: [] });
   const [cloudEdits, setCloudEdits] = useState({
     icloud: { custom_path: '', prefer_api: false, delete_local_after_upload: false, evict_local_after_sync: false },
-    gdrive: { custom_path: '', prefer_api: false, delete_local_after_upload: true, evict_local_after_sync: false, access_token: '', refresh_token: '', client_id: '' },
-    onedrive: { custom_path: '', prefer_api: false, delete_local_after_upload: true, evict_local_after_sync: false, access_token: '', refresh_token: '', client_id: '' },
+    gdrive: { custom_path: '', prefer_api: false, delete_local_after_upload: true, evict_local_after_sync: false, rclone_remote: '', access_token: '', refresh_token: '', client_id: '' },
+    onedrive: { custom_path: '', prefer_api: false, delete_local_after_upload: true, evict_local_after_sync: false, rclone_remote: '', access_token: '', refresh_token: '', client_id: '' },
     webdav: { webdav_url: '', username: '', password: '', base_path: '' },
   });
   const [expandedCloudApi, setExpandedCloudApi] = useState(null);
@@ -190,6 +191,7 @@ export default function UnifiedSettingsModal({
             prefer_api: Boolean(t.prefer_api),
             delete_local_after_upload: Boolean(t.delete_local_after_upload),
             evict_local_after_sync: Boolean(t.evict_local_after_sync),
+            rclone_remote: t.rclone_remote || '',
             access_token: '',
             refresh_token: '',
             client_id: t.client_id || '',
@@ -343,6 +345,7 @@ export default function UnifiedSettingsModal({
         provider_id: pid,
         custom_path: edit.custom_path,
         prefer_api: edit.prefer_api,
+        rclone_remote: edit.rclone_remote,
         access_token: edit.access_token,
         refresh_token: edit.refresh_token,
         client_id: edit.client_id,
@@ -361,17 +364,50 @@ export default function UnifiedSettingsModal({
   };
 
   const [oauthWaitingId, setOauthWaitingId] = useState(null);
+  const [oauthWaitingMode, setOauthWaitingMode] = useState('any');
 
   useEffect(() => {
     if (!isOpen || !oauthWaitingId) return undefined;
     const poll = setInterval(async () => {
       try {
-        const res = await fetchCloudTargets();
+        const [res, rcloneSt] = await Promise.all([
+          fetchCloudTargets(),
+          oauthWaitingMode === 'api' ? fetchCloudRcloneStatus(oauthWaitingId).catch(() => null) : Promise.resolve(null),
+        ]);
+        if (rcloneSt && rcloneSt.status === 'error') {
+          const failedId = oauthWaitingId;
+          setOauthWaitingId(null);
+          setCloudTestResults((prev) => ({
+            ...prev,
+            [failedId]: { status: 'error', message: rcloneSt.message || 'Sign-in did not complete.' },
+          }));
+          return;
+        }
         if (!res) return;
         setCloudConfig(res);
         const target = (res.targets || []).find((t) => t.id === oauthWaitingId);
-        if (target && target.available) {
+        const ready = target && (oauthWaitingMode === 'api'
+          ? (target.mode === 'api' && target.zero_local_disk)
+          : target.available);
+        if (ready) {
           setOauthWaitingId(null);
+          setCloudEdits((prev) => ({
+            ...prev,
+            [target.id]: {
+              ...(prev[target.id] || {}),
+              prefer_api: Boolean(target.prefer_api),
+              rclone_remote: target.rclone_remote || '',
+            },
+          }));
+          setCloudTestResults((prev) => ({
+            ...prev,
+            [target.id]: {
+              status: 'ok',
+              message: target.mode === 'api'
+                ? `${target.name} connected (${target.account || 'Direct Stream'}) • 0 Local Disk Stream active!`
+                : `${target.name} connected!`,
+            },
+          }));
           playVictorySound();
           showToast(`${target.name} signed in & connected!`);
           if (onSourcesChanged) onSourcesChanged();
@@ -379,18 +415,40 @@ export default function UnifiedSettingsModal({
       } catch {
         // ignore poll error
       }
-    }, 2200);
+    }, 2000);
     return () => clearInterval(poll);
-  }, [isOpen, oauthWaitingId, onSourcesChanged]);
+  }, [isOpen, oauthWaitingId, oauthWaitingMode, onSourcesChanged]);
 
   const handleCloudSystemSignIn = async (pid) => {
     playClick();
     try {
       const res = await openCloudSystemSignIn({ provider_id: pid });
+      setOauthWaitingMode('any');
       setOauthWaitingId(pid);
       setCloudTestResults((prev) => ({ ...prev, [pid]: { status: 'ok', message: res.message } }));
       showToast(res.message || 'Opened cloud sign-in window...');
     } catch (err) {
+      setCloudTestResults((prev) => ({ ...prev, [pid]: { status: 'error', message: err.message } }));
+    }
+  };
+
+  const handleCloudRcloneSignIn = async (target) => {
+    playClick();
+    const pid = target.id;
+    try {
+      const res = await startCloudRcloneSignIn({ provider_id: pid });
+      setOauthWaitingMode('api');
+      setOauthWaitingId(pid);
+      setCloudTestResults((prev) => ({
+        ...prev,
+        [pid]: {
+          status: 'ok',
+          message: res.message || `Chrome opened — sign in to ${target.name} & click Allow for 0-Disk streaming!`,
+        },
+      }));
+      showToast(`Browser opened for 1-Click 0-Disk ${target.name} Sign-In...`);
+    } catch (err) {
+      setExpandedCloudApi(pid);
       setCloudTestResults((prev) => ({ ...prev, [pid]: { status: 'error', message: err.message } }));
     }
   };
@@ -403,14 +461,7 @@ export default function UnifiedSettingsModal({
     const hasClientSecret = pid !== 'gdrive' || Boolean(target.has_oauth_client_secret || edit.client_secret?.trim());
     if (!hasClientId || !hasClientSecret) {
       setExpandedCloudApi(pid);
-      let msg;
-      if (pid === 'gdrive') {
-        msg = target.available
-          ? "Google Drive Desktop App is already connected — click 'Set Default' to use it now (0 keys), or paste your free Google Desktop OAuth Client ID + Client Secret below and click 'Sign in with Browser' for 0-Local-Disk streaming."
-          : "Click 'Sign in (GDrive App)' for instant 0-key sign-in, or paste your free Google Desktop OAuth Client ID + Client Secret below and click 'Sign in with Browser'.";
-      } else {
-        msg = "Click 'Connect OneDrive App' for instant 0-key sign-in, or paste your free Microsoft Entra Application (Client) ID below (no secret needed) and click 'Sign in with Browser'.";
-      }
+      const msg = "For zero developer console setup, click '1-Click 0-Disk Sign-In' (via rclone). Or enter your own custom OAuth Client ID below for direct PKCE Browser Sign-In.";
       setCloudTestResults((prev) => ({
         ...prev,
         [pid]: {
@@ -426,6 +477,7 @@ export default function UnifiedSettingsModal({
         client_id: edit.client_id?.trim() || undefined,
         client_secret: edit.client_secret?.trim() || undefined,
       });
+      setOauthWaitingMode('api');
       setOauthWaitingId(pid);
       setCloudTestResults((prev) => ({
         ...prev,
@@ -458,6 +510,7 @@ export default function UnifiedSettingsModal({
             prefer_api: Boolean(edit.prefer_api),
             delete_local_after_upload: Boolean(edit.delete_local_after_upload),
             evict_local_after_sync: Boolean(edit.evict_local_after_sync),
+            rclone_remote: edit.rclone_remote?.trim() || '',
             client_id: edit.client_id?.trim() || '',
             client_secret: edit.client_secret?.trim() || '',
             clear_token: clearToken,
@@ -1240,6 +1293,11 @@ export default function UnifiedSettingsModal({
                                     Zero Local Drive Usage
                                   </span>
                                 )}
+                                {!t.zero_local_disk && t.auto_offload && (
+                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-700/60">
+                                    Auto-Offload After Sync
+                                  </span>
+                                )}
                                 {t.account && (
                                   <span className="text-[11px] font-mono text-slate-400">{t.account}</span>
                                 )}
@@ -1260,19 +1318,29 @@ export default function UnifiedSettingsModal({
                                   <>
                                     <button
                                       type="button"
+                                      onClick={() => handleCloudRcloneSignIn(t)}
+                                      className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 text-black text-[11px] font-black cursor-pointer shadow-glow-cyan"
+                                      title={`1-Click 0-Disk Sign-In via rclone (no Google/Microsoft developer console needed)`}
+                                    >
+                                      {isWaitingAuth && oauthWaitingMode === 'api'
+                                        ? 'Waiting Allow...'
+                                        : (t.rclone_remote ? `Reconnect 0-Disk` : `1-Click 0-Disk Sign-In`)}
+                                    </button>
+                                    <button
+                                      type="button"
                                       onClick={() => handleCloudSystemSignIn(t.id)}
                                       className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold cursor-pointer"
-                                      title={`Sign in via official ${t.name} app (instant, zero keys)`}
+                                      title={`Sign in via official ${t.name} desktop app`}
                                     >
                                       {t.desktop_app_installed ? `Sign in (${t.short_name} App)` : `Connect ${t.short_name} App`}
                                     </button>
                                     <button
                                       type="button"
                                       onClick={() => handleCloudBrowserSignIn(t)}
-                                      className="px-2.5 py-1 rounded-lg bg-sky-500 hover:bg-sky-400 text-black text-[11px] font-black cursor-pointer"
-                                      title="Sign in & Allow in Browser (OAuth 2.0 PKCE — Direct 0-Disk Cloud Stream)"
+                                      className="px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 text-[11px] font-bold cursor-pointer"
+                                      title="Optional custom OAuth 2.0 Client ID Browser Sign-In"
                                     >
-                                      {isWaitingAuth ? 'Waiting...' : 'Browser Sign-In'}
+                                      {isWaitingAuth && oauthWaitingMode === 'api' ? 'Waiting...' : 'Browser Sign-In'}
                                     </button>
                                   </>
                                 )}
@@ -1429,12 +1497,55 @@ export default function UnifiedSettingsModal({
                                   </>
                                 ) : t.supports_oauth ? (
                                   <>
+                                    <div className="p-3 rounded-xl bg-cyan-950/35 border border-cyan-500/30 space-y-2">
+                                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                                        <div className="text-[11px] text-slate-200">
+                                          <strong className="text-cyan-300">Recommended: 1-Click 0-Disk Stream (via rclone)</strong>{' '}
+                                          — zero Google Cloud / Microsoft Entra console setup, zero keys, 0 bytes touched on internal SSD.
+                                        </div>
+                                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                                          t.rclone_installed
+                                            ? 'bg-emerald-950/70 text-emerald-300 border-emerald-700/60'
+                                            : 'bg-amber-950/70 text-amber-300 border-amber-700/60'
+                                        }`}>
+                                          {t.rclone_installed
+                                            ? (t.rclone_remote ? `rclone: ${t.rclone_remote}:` : 'rclone ready')
+                                            : 'Install: brew install rclone'}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        {(t.rclone_available_remotes || []).length > 0 && (
+                                          <select
+                                            value={edit.rclone_remote || t.rclone_remote || ''}
+                                            onChange={(e) => setCloudEdits((prev) => ({
+                                              ...prev,
+                                              [t.id]: { ...edit, rclone_remote: e.target.value, prefer_api: Boolean(e.target.value) },
+                                            }))}
+                                            className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-white/10 text-xs font-mono text-white focus:outline-none focus:border-cyan-400"
+                                          >
+                                            <option value="">Auto ({`omnivault-${t.id}`})</option>
+                                            {(t.rclone_available_remotes || []).map((rm) => (
+                                              <option key={rm} value={rm}>{rm}:</option>
+                                            ))}
+                                          </select>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() => handleCloudRcloneSignIn(t)}
+                                          className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 text-black text-xs font-black cursor-pointer"
+                                        >
+                                          {isWaitingAuth && oauthWaitingMode === 'api'
+                                            ? 'Waiting for Allow...'
+                                            : (t.rclone_remote ? `Reconnect ${t.short_name} (rclone)` : `1-Click 0-Disk Sign-In (${t.short_name})`)}
+                                        </button>
+                                      </div>
+                                    </div>
                                     <div className="text-[11px] text-slate-300 leading-relaxed">
-                                      <strong className="text-white">Browser OAuth 2.0 PKCE Sign-In (0 Local Disk Direct Cloud Stream):</strong>{' '}
+                                      <strong className="text-white">Optional Advanced Fallback — Custom OAuth 2.0 Client ID:</strong>{' '}
                                       {t.id === 'gdrive'
-                                        ? 'Enter your own free Google Cloud Desktop OAuth Client ID and Client Secret once, then click '
-                                        : 'Enter your own free Microsoft Entra public Client ID once (no secret required), then click '}
-                                      <strong className="text-sky-300">Sign in with Browser</strong> to stream ROMs straight to <span className="font-mono text-cyan-300">OmniVault/ROMs/&lt;Console&gt;/</span> with 0 bytes written locally.
+                                        ? 'Or paste your own Google Cloud Desktop OAuth Client ID and Client Secret below and click '
+                                        : 'Or paste your own Microsoft Entra public Client ID below (no secret required) and click '}
+                                      <strong className="text-sky-300">Browser Sign-In</strong>.
                                       {t.has_api_token && (
                                         <span className="ml-2 font-mono text-emerald-400">
                                           • Active Session ({t.masked_token || 'Connected'})
@@ -1517,7 +1628,7 @@ export default function UnifiedSettingsModal({
                                         </label>
                                       </div>
                                       <div className="flex items-center gap-2">
-                                        {t.has_api_token && (
+                                        {(t.has_api_token || t.rclone_remote) && (
                                           <button
                                             type="button"
                                             onClick={() => handleSaveCloudProvider(t.id, true)}

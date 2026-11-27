@@ -13,10 +13,12 @@ from ..services.storage_service import (
 )
 from ..services.cloud_storage_service import (
     complete_cloud_oauth_callback,
+    get_cloud_rclone_auth_status,
     get_cloud_targets_status,
     open_cloud_system_signin,
     save_cloud_targets_config,
     start_cloud_oauth_flow,
+    start_cloud_rclone_signin,
     test_cloud_target,
 )
 
@@ -182,3 +184,21 @@ async def handle_cloud_oauth_callback(
         error_description=error_description,
     )
     return HTMLResponse(content=html_page)
+
+
+@router.post("/cloud-rclone/signin")
+def initiate_cloud_rclone_signin(payload: Dict[str, Any] = Body(...)):
+    """Opens 1-click browser Allow flow via local rclone CLI for 0-Local-Disk cloud streaming."""
+    try:
+        provider_id = payload.get("provider_id", "")
+        return start_cloud_rclone_signin(provider_id)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start rclone sign-in: {str(e)}")
+
+
+@router.get("/cloud-rclone/status")
+def read_cloud_rclone_signin_status(provider_id: str = Query(...)):
+    """Returns live status of background 1-click rclone sign-in flow."""
+    return get_cloud_rclone_auth_status(provider_id)

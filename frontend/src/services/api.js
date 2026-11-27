@@ -741,3 +741,24 @@ export async function openCloudSystemSignIn(payload) {
   }
   return res.json();
 }
+
+export async function startCloudRcloneSignIn(payload) {
+  const res = await fetch(`${API_BASE}/storage/cloud-rclone/signin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to start 1-click rclone sign-in');
+  }
+  return res.json();
+}
+
+export async function fetchCloudRcloneStatus(providerId) {
+  const res = await fetch(`${API_BASE}/storage/cloud-rclone/status?provider_id=${encodeURIComponent(providerId)}`, {
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error('Failed to fetch rclone sign-in status');
+  return res.json();
+}

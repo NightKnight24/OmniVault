@@ -69,6 +69,95 @@ CLOUD_TARGET_IDS = ("icloud", "gdrive", "onedrive", "webdav")
 # Ephemeral PKCE state store (in-memory only, never persisted to git)
 _PENDING_OAUTH_STATES: Dict[str, Dict[str, Any]] = {}
 _ICLOUD_QUOTA_CACHE: Dict[str, Any] = {"ts": 0.0, "ttl": 0.0, "free_gb": None, "refreshing": False}
+_RCLONE_REMOTES_CACHE: Dict[str, Any] = {"ts": 0.0, "ttl": 5.0, "data": None}
+_RCLONE_AUTH_LOCK = threading.Lock()
+_RCLONE_AUTH_STATE: Dict[str, Dict[str, Any]] = {}
+_RCLONE_AUTH_PROCS: Dict[str, subprocess.Popen] = {}
+
+RCLONE_BACKEND_BY_PROVIDER: Dict[str, str] = {
+    "gdrive": "drive",
+    "onedrive": "onedrive",
+}
+
+
+def _clean_subprocess_env() -> Dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("DYLD_", "PYTHON"))}
+    extra_bins = ["/opt/homebrew/bin", "/usr/local/bin", str(Path.home() / ".local" / "bin")]
+    cur_path = env.get("PATH") or "/usr/bin:/bin:/usr/sbin:/sbin"
+    parts = [p for p in cur_path.split(os.pathsep) if p]
+    for b in reversed(extra_bins):
+        if b not in parts:
+            parts.insert(0, b)
+    env["PATH"] = os.pathsep.join(parts)
+    return env
+
+
+def _find_rclone_binary() -> Optional[str]:
+    for candidate in (
+        shutil.which("rclone"),
+        "/opt/homebrew/bin/rclone",
+        "/usr/local/bin/rclone",
+        str(Path.home() / ".local" / "bin" / "rclone"),
+    ):
+        if candidate and Path(candidate).exists() and os.access(str(candidate), os.X_OK):
+            return str(candidate)
+    return None
+
+
+def _invalidate_rclone_cache() -> None:
+    _RCLONE_REMOTES_CACHE["ts"] = 0.0
+    _RCLONE_REMOTES_CACHE["data"] = None
+
+
+def detect_rclone_remotes(force: bool = False) -> Dict[str, List[str]]:
+    """Detects configured rclone Google Drive (`drive`) and OneDrive (`onedrive`) remotes."""
+    now = time.monotonic()
+    cached = _RCLONE_REMOTES_CACHE.get("data")
+    if not force and cached is not None and (now - _RCLONE_REMOTES_CACHE.get("ts", 0.0)) < _RCLONE_REMOTES_CACHE.get("ttl", 5.0):
+        return cached
+
+    result: Dict[str, List[str]] = {"drive": [], "onedrive": []}
+    rclone_bin = _find_rclone_binary()
+    if rclone_bin:
+        try:
+            res = subprocess.run(
+                [rclone_bin, "listremotes", "--long"],
+                capture_output=True,
+                text=True,
+                timeout=4,
+                check=False,
+                env=_clean_subprocess_env(),
+            )
+            if res.returncode == 0 and res.stdout:
+                for line in res.stdout.splitlines():
+                    line = line.strip()
+                    if ":" not in line:
+                        continue
+                    remote_part, rest = line.split(":", 1)
+                    remote_name = remote_part.strip()
+                    rtype = (rest.strip().split() or [""])[0].lower()
+                    if rtype in result and remote_name:
+                        result[rtype].append(remote_name)
+        except Exception:
+            pass
+
+    _RCLONE_REMOTES_CACHE["ts"] = now
+    _RCLONE_REMOTES_CACHE["data"] = result
+    return result
+
+
+def _get_active_rclone_remote(pid: str, pcfg: Dict[str, Any], remotes_map: Dict[str, List[str]]) -> str:
+    rtype = RCLONE_BACKEND_BY_PROVIDER.get(pid)
+    if not rtype:
+        return ""
+    available = remotes_map.get(rtype) or []
+    configured = str(pcfg.get("rclone_remote") or "").strip().rstrip(":")
+    if configured and configured in available:
+        return configured
+    default_remote = f"omnivault-{pid}"
+    if default_remote in available:
+        return default_remote
+    return ""
 
 
 def sanitize_console_folder_name(platform: str) -> str:
@@ -93,6 +182,7 @@ def _default_cloud_config() -> Dict[str, Any]:
                 "prefer_api": False,
                 "delete_local_after_upload": True,
                 "evict_local_after_sync": False,
+                "rclone_remote": "",
                 "access_token": "",
                 "refresh_token": "",
                 "client_id": "",
@@ -104,6 +194,7 @@ def _default_cloud_config() -> Dict[str, Any]:
                 "prefer_api": False,
                 "delete_local_after_upload": True,
                 "evict_local_after_sync": False,
+                "rclone_remote": "",
                 "access_token": "",
                 "refresh_token": "",
                 "client_id": "",
@@ -438,6 +529,11 @@ def _build_target_entry(pid: str, cfg: Dict[str, Any], mounts: Dict[str, Dict[st
             "prefer_api": True,
             "delete_local_after_upload": True,
             "evict_local_after_sync": False,
+            "auto_offload": False,
+            "rclone_installed": bool(_find_rclone_binary()),
+            "rclone_remote": "",
+            "rclone_available_remotes": [],
+            "stream_backend": "webdav" if is_valid else "unconfigured",
             "badge_color": meta["badge_color"],
         }
 
@@ -459,6 +555,15 @@ def _build_target_entry(pid: str, cfg: Dict[str, Any], mounts: Dict[str, Dict[st
     eff_client_id = _resolve_oauth_client_id(pid, pcfg)
     eff_client_secret = _resolve_oauth_client_secret(pid, pcfg)
     has_api_token = bool(meta["supports_api"] and (token or (refresh and eff_client_id)))
+
+    rclone_bin = _find_rclone_binary()
+    rtype = RCLONE_BACKEND_BY_PROVIDER.get(pid)
+    remotes_map = detect_rclone_remotes() if (meta["supports_api"] and rclone_bin and rtype) else {"drive": [], "onedrive": []}
+    available_rclone_remotes = remotes_map.get(rtype, []) if rtype else []
+    active_rclone = _get_active_rclone_remote(pid, pcfg, remotes_map)
+    has_rclone = bool(rclone_bin and active_rclone)
+    has_direct_stream = has_api_token or has_rclone
+
     prefer_api = bool(pcfg.get("prefer_api") and meta["supports_api"])
     connected_account = str(pcfg.get("connected_account") or "").strip()
 
@@ -471,13 +576,19 @@ def _build_target_entry(pid: str, cfg: Dict[str, Any], mounts: Dict[str, Dict[st
     mode = "unconfigured"
     available = False
     zero_local_disk = False
+    auto_offload = False
+    stream_backend = "unconfigured"
 
-    if has_api_token and (prefer_api or not (custom_valid or native)):
-        account = connected_account or "Signed In (Direct Cloud Stream)"
+    if has_direct_stream and (prefer_api or not (custom_valid or native)):
         mode = "api"
         available = True
         zero_local_disk = True
-        quota_label = "0 Local Disk Stream"
+        auto_offload = False
+        stream_backend = "rclone" if has_rclone else "oauth_api"
+        quota_label = "0 Local Disk Stream (rclone)" if stream_backend == "rclone" else "0 Local Disk Stream"
+        account = connected_account or (
+            f"rclone ({active_rclone}:)" if stream_backend == "rclone" else "Signed In (Direct Cloud Stream)"
+        )
         roms_path = f"{meta['name']}:/OmniVault/ROMs/<Console>/"
         if native:
             mount_path = native["mount_path"]
@@ -494,7 +605,9 @@ def _build_target_entry(pid: str, cfg: Dict[str, Any], mounts: Dict[str, Dict[st
             quota_label = "Cloud Sync Ready"
         mode = "mount"
         available = True
-        zero_local_disk = bool(pcfg.get("evict_local_after_sync"))
+        zero_local_disk = False
+        auto_offload = bool(pcfg.get("evict_local_after_sync"))
+        stream_backend = "mount"
     elif native:
         mount_path = native["mount_path"]
         roms_path = native["roms_path"]
@@ -507,13 +620,19 @@ def _build_target_entry(pid: str, cfg: Dict[str, Any], mounts: Dict[str, Dict[st
             quota_label = "Cloud Sync Ready"
         mode = "mount"
         available = True
-        zero_local_disk = bool(pcfg.get("evict_local_after_sync"))
-    elif has_api_token:
-        account = connected_account or "Signed In (Direct Cloud Stream)"
+        zero_local_disk = False
+        auto_offload = bool(pcfg.get("evict_local_after_sync"))
+        stream_backend = "mount"
+    elif has_direct_stream:
         mode = "api"
         available = True
         zero_local_disk = True
-        quota_label = "0 Local Disk Stream"
+        auto_offload = False
+        stream_backend = "rclone" if has_rclone else "oauth_api"
+        quota_label = "0 Local Disk Stream (rclone)" if stream_backend == "rclone" else "0 Local Disk Stream"
+        account = connected_account or (
+            f"rclone ({active_rclone}:)" if stream_backend == "rclone" else "Signed In (Direct Cloud Stream)"
+        )
         roms_path = f"{meta['name']}:/OmniVault/ROMs/<Console>/"
 
     return {
@@ -523,6 +642,7 @@ def _build_target_entry(pid: str, cfg: Dict[str, Any], mounts: Dict[str, Dict[st
         "available": available,
         "mode": mode,
         "zero_local_disk": zero_local_disk,
+        "auto_offload": auto_offload,
         "console_subfolder_pattern": "OmniVault/ROMs/<Console>/",
         "mount_path": mount_path,
         "roms_path": roms_path,
@@ -535,6 +655,10 @@ def _build_target_entry(pid: str, cfg: Dict[str, Any], mounts: Dict[str, Dict[st
         "supports_oauth": bool(meta["supports_oauth"]),
         "supports_webdav": False,
         "desktop_app_installed": _desktop_app_installed(pid),
+        "rclone_installed": bool(rclone_bin),
+        "rclone_remote": active_rclone,
+        "rclone_available_remotes": available_rclone_remotes,
+        "stream_backend": stream_backend,
         "has_oauth_client_id": bool(eff_client_id),
         "client_id": str(pcfg.get("client_id") or ""),
         "has_oauth_client_secret": bool(eff_client_secret),
@@ -595,6 +719,11 @@ def save_cloud_targets_config(payload: Dict[str, Any]) -> Dict[str, Any]:
             target_cfg["delete_local_after_upload"] = bool(upd.get("delete_local_after_upload"))
         if "evict_local_after_sync" in upd:
             target_cfg["evict_local_after_sync"] = bool(upd.get("evict_local_after_sync"))
+        if "rclone_remote" in upd:
+            new_remote = str(upd.get("rclone_remote") or "").strip().rstrip(":")
+            target_cfg["rclone_remote"] = new_remote
+            if new_remote and upd.get("prefer_api") is not False:
+                target_cfg["prefer_api"] = True
         if "client_id" in upd:
             target_cfg["client_id"] = str(upd.get("client_id") or "").strip()
         if "client_secret" in upd and str(upd.get("client_secret") or "").strip():
@@ -603,6 +732,25 @@ def save_cloud_targets_config(payload: Dict[str, Any]) -> Dict[str, Any]:
             target_cfg["access_token"] = ""
             target_cfg["refresh_token"] = ""
             target_cfg["connected_account"] = ""
+            target_cfg["rclone_remote"] = ""
+            target_cfg["prefer_api"] = False
+            rclone_bin = _find_rclone_binary()
+            managed_remote = f"omnivault-{pid}"
+            if rclone_bin and pid in RCLONE_BACKEND_BY_PROVIDER:
+                remotes_map = detect_rclone_remotes(force=True)
+                if managed_remote in (remotes_map.get(RCLONE_BACKEND_BY_PROVIDER[pid]) or []):
+                    try:
+                        subprocess.run(
+                            [rclone_bin, "config", "delete", managed_remote],
+                            capture_output=True,
+                            text=True,
+                            timeout=6,
+                            check=False,
+                            env=_clean_subprocess_env(),
+                        )
+                    except Exception:
+                        pass
+            _invalidate_rclone_cache()
         else:
             for key in ("access_token", "refresh_token"):
                 if key in upd and str(upd.get(key) or "").strip():
@@ -979,6 +1127,296 @@ async def complete_cloud_oauth_callback(
         return _render_oauth_html(False, "Cloud Sign-In Error", str(exc))
 
 
+def _extract_rclone_authorize_token(stdout_text: str) -> Optional[str]:
+    """Extracts the JSON token payload from `rclone authorize` stdout without logging secrets."""
+    if not stdout_text:
+        return None
+    marker_match = re.search(r"--->\s*(\{.*?\})\s*<---End paste", stdout_text, re.S)
+    candidates = [marker_match.group(1)] if marker_match else []
+    if not candidates:
+        for m in re.finditer(r"\{[^{}]*\"access_token\"[^{}]*\}", stdout_text, re.S):
+            candidates.append(m.group(0))
+    for cand in candidates:
+        try:
+            parsed = json.loads(cand)
+            if isinstance(parsed, dict) and parsed.get("access_token"):
+                return json.dumps(parsed, separators=(",", ":"))
+        except Exception:
+            continue
+    return None
+
+
+def _save_rclone_remote_config(
+    rclone_bin: str,
+    pid: str,
+    remote_name: str,
+    token_json: str,
+    drive_id: str = "",
+    drive_type: str = "",
+) -> None:
+    """Writes an authenticated rclone remote into local `~/.config/rclone/rclone.conf` non-interactively."""
+    env = _clean_subprocess_env()
+    rtype = RCLONE_BACKEND_BY_PROVIDER[pid]
+    args: List[str] = [
+        rclone_bin,
+        "config",
+        "create",
+        remote_name,
+        rtype,
+        f"token={token_json}",
+        "config_is_local=false",
+        "config_refresh_token=false",
+    ]
+    if rtype == "drive":
+        args.extend([
+            "scope=drive",
+            "config_shared_client_id=true",
+            "config_change_team_drive=false",
+        ])
+    else:
+        args.extend([
+            f"drive_type={drive_type or 'personal'}",
+            "config_type=onedrive",
+        ])
+        if drive_id:
+            args.append(f"drive_id={drive_id}")
+    args.append("--non-interactive")
+
+    res = subprocess.run(
+        args,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+        env=env,
+    )
+    if res.returncode != 0:
+        raise RuntimeError(f"rclone config create failed: {(res.stderr or res.stdout or '').strip()[:200]}")
+
+    for _ in range(5):
+        out_txt = (res.stdout or "").strip()
+        if not out_txt.startswith("{"):
+            break
+        try:
+            step = json.loads(out_txt)
+        except Exception:
+            break
+        state = str(step.get("State") or "").strip()
+        if not state:
+            break
+        opt = step.get("Option") or {}
+        ans = opt.get("DefaultStr")
+        if ans in (None, "") and opt.get("Default") is not None:
+            ans = str(opt.get("Default")).lower() if isinstance(opt.get("Default"), bool) else str(opt.get("Default"))
+        if ans in (None, "") and opt.get("Examples"):
+            ans = str(opt["Examples"][0].get("Value") or "")
+        res = subprocess.run(
+            [
+                rclone_bin,
+                "config",
+                "update",
+                remote_name,
+                "--continue",
+                "--state",
+                state,
+                "--result",
+                str(ans if ans is not None else "false"),
+                "--non-interactive",
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+            env=env,
+        )
+
+    remotes_map = detect_rclone_remotes(force=True)
+    if remote_name not in (remotes_map.get(rtype) or []):
+        raise RuntimeError(f"rclone remote '{remote_name}' was not saved cleanly")
+
+
+def start_cloud_rclone_signin(provider_id: str) -> Dict[str, Any]:
+    """
+    Starts 1-click browser sign-in via `rclone authorize` (no developer console, no credit card,
+    no bundled OAuth secrets) and saves the local remote for 0-Local-Disk RAM-pipe streaming.
+    """
+    pid = (provider_id or "").strip().lower()
+    if pid not in RCLONE_BACKEND_BY_PROVIDER:
+        raise ValueError("1-click rclone sign-in is supported for Google Drive and OneDrive.")
+
+    rclone_bin = _find_rclone_binary()
+    if not rclone_bin:
+        raise ValueError(
+            "rclone is not installed yet. Install it once via Terminal: `brew install rclone` — "
+            "then click 1-Click 0-Disk Sign-In again."
+        )
+
+    rtype = RCLONE_BACKEND_BY_PROVIDER[pid]
+    remote_name = f"omnivault-{pid}"
+    env = _clean_subprocess_env()
+
+    with _RCLONE_AUTH_LOCK:
+        for old_pid, old_proc in list(_RCLONE_AUTH_PROCS.items()):
+            try:
+                if old_proc.poll() is None:
+                    old_proc.terminate()
+                    old_proc.wait(timeout=2)
+            except Exception:
+                try:
+                    old_proc.kill()
+                except Exception:
+                    pass
+            _RCLONE_AUTH_PROCS.pop(old_pid, None)
+
+        proc = subprocess.Popen(
+            [rclone_bin, "authorize", rtype],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        _RCLONE_AUTH_PROCS[pid] = proc
+        _RCLONE_AUTH_STATE[pid] = {
+            "status": "waiting",
+            "provider_id": pid,
+            "remote_name": remote_name,
+            "message": f"Chrome / default browser opened for {CLOUD_PROVIDER_META[pid]['name']} sign-in — click Allow to connect.",
+            "updated_at": time.time(),
+        }
+
+    def _await_rclone_auth() -> None:
+        try:
+            stdout_data, stderr_data = proc.communicate(timeout=300)
+            if proc.returncode != 0:
+                err_msg = (stderr_data or stdout_data or "").strip().splitlines()[-1:] or ["Sign-in was cancelled or timed out."]
+                with _RCLONE_AUTH_LOCK:
+                    _RCLONE_AUTH_STATE[pid] = {
+                        "status": "error",
+                        "provider_id": pid,
+                        "message": f"rclone sign-in failed: {err_msg[0][:220]}",
+                        "updated_at": time.time(),
+                    }
+                return
+
+            token_json = _extract_rclone_authorize_token(stdout_data or "")
+            if not token_json:
+                with _RCLONE_AUTH_LOCK:
+                    _RCLONE_AUTH_STATE[pid] = {
+                        "status": "error",
+                        "provider_id": pid,
+                        "message": "rclone authorize completed without returning a token.",
+                        "updated_at": time.time(),
+                    }
+                return
+
+            tok_obj = json.loads(token_json)
+            access_tok = str(tok_obj.get("access_token") or "").strip()
+            account_label = ""
+            od_drive_id = ""
+            od_drive_type = "personal"
+            if access_tok:
+                try:
+                    with httpx.Client(timeout=10.0, verify=False) as client:
+                        if pid == "gdrive":
+                            about = client.get(
+                                "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,displayName)",
+                                headers={"Authorization": f"Bearer {access_tok}"},
+                            )
+                            if about.status_code == 200:
+                                u = about.json().get("user") or {}
+                                account_label = u.get("emailAddress") or u.get("displayName") or ""
+                        else:
+                            drv = client.get(
+                                "https://graph.microsoft.com/v1.0/me/drive",
+                                headers={"Authorization": f"Bearer {access_tok}"},
+                            )
+                            if drv.status_code == 200:
+                                dj = drv.json()
+                                od_drive_id = str(dj.get("id") or "").strip()
+                                od_drive_type = str(dj.get("driveType") or "personal").strip()
+                                u = (dj.get("owner") or {}).get("user") or {}
+                                account_label = u.get("email") or u.get("displayName") or ""
+                except Exception:
+                    pass
+
+            _save_rclone_remote_config(
+                rclone_bin=rclone_bin,
+                pid=pid,
+                remote_name=remote_name,
+                token_json=token_json,
+                drive_id=od_drive_id,
+                drive_type=od_drive_type,
+            )
+
+            cfg = _load_raw_cloud_config()
+            pcfg = cfg["providers"].setdefault(pid, {})
+            pcfg["rclone_remote"] = remote_name
+            pcfg["prefer_api"] = True
+            pcfg["delete_local_after_upload"] = True
+            if account_label:
+                pcfg["connected_account"] = f"{account_label} (rclone)"
+            else:
+                pcfg["connected_account"] = f"rclone ({remote_name}:)"
+            _save_raw_cloud_config(cfg)
+            _invalidate_rclone_cache()
+
+            with _RCLONE_AUTH_LOCK:
+                _RCLONE_AUTH_STATE[pid] = {
+                    "status": "completed",
+                    "provider_id": pid,
+                    "remote_name": remote_name,
+                    "account": pcfg["connected_account"],
+                    "message": (
+                        f"{CLOUD_PROVIDER_META[pid]['name']} connected via rclone"
+                        + (f" ({account_label})" if account_label else "")
+                        + " — 0-Local-Disk RAM-pipe streaming is ready!"
+                    ),
+                    "updated_at": time.time(),
+                }
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            with _RCLONE_AUTH_LOCK:
+                _RCLONE_AUTH_STATE[pid] = {
+                    "status": "error",
+                    "provider_id": pid,
+                    "message": "Sign-in timed out after 5 minutes. Click 1-Click 0-Disk Sign-In to try again.",
+                    "updated_at": time.time(),
+                }
+        except Exception as exc:
+            with _RCLONE_AUTH_LOCK:
+                _RCLONE_AUTH_STATE[pid] = {
+                    "status": "error",
+                    "provider_id": pid,
+                    "message": str(exc),
+                    "updated_at": time.time(),
+                }
+        finally:
+            with _RCLONE_AUTH_LOCK:
+                if _RCLONE_AUTH_PROCS.get(pid) is proc:
+                    _RCLONE_AUTH_PROCS.pop(pid, None)
+
+    threading.Thread(target=_await_rclone_auth, daemon=True).start()
+    return {
+        "status": "opened",
+        "provider_id": pid,
+        "remote_name": remote_name,
+        "message": f"Opened {CLOUD_PROVIDER_META[pid]['name']} 1-click Allow page in your browser (via rclone).",
+    }
+
+
+def get_cloud_rclone_auth_status(provider_id: str) -> Dict[str, Any]:
+    pid = (provider_id or "").strip().lower()
+    with _RCLONE_AUTH_LOCK:
+        st = dict(_RCLONE_AUTH_STATE.get(pid) or {"status": "idle", "provider_id": pid})
+    return st
+
+
 async def _refresh_oauth_token(provider_id: str, pcfg: Dict[str, Any]) -> str:
     access_token = str(pcfg.get("access_token") or "").strip()
     refresh_token = str(pcfg.get("refresh_token") or "").strip()
@@ -1057,6 +1495,7 @@ async def test_cloud_target(provider_id: str, override_payload: Optional[Dict[st
         pcfg = dict(cfg["providers"].get(pid) or {})
         for k in (
             "custom_path", "prefer_api", "delete_local_after_upload", "evict_local_after_sync",
+            "rclone_remote",
             "access_token", "refresh_token", "client_id", "client_secret",
             "webdav_url", "username", "password", "base_path",
         ):
@@ -1150,6 +1589,60 @@ async def test_cloud_target(provider_id: str, override_payload: Optional[Dict[st
                 "message": f"{entry['name']} folder not writable: {exc}",
             }
 
+    if entry.get("stream_backend") == "rclone" and entry.get("rclone_remote"):
+        rclone_bin = _find_rclone_binary()
+        active_remote = entry["rclone_remote"]
+        if not rclone_bin:
+            return {"status": "error", "provider_id": pid, "mode": "api", "message": "rclone binary not found on PATH."}
+        env = _clean_subprocess_env()
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                rclone_bin,
+                "about",
+                f"{active_remote}:",
+                "--json",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=12.0)
+            if proc.returncode == 0 and stdout_b:
+                about_data = json.loads(stdout_b.decode("utf-8", errors="ignore"))
+                free_b = about_data.get("free")
+                free_gb = round(int(free_b) / (1024 ** 3), 1) if free_b is not None else None
+                quota_note = f" • {free_gb} GB free" if free_gb is not None else ""
+                return {
+                    "status": "ok",
+                    "provider_id": pid,
+                    "mode": "api",
+                    "message": f"{entry['name']} rclone Direct Stream verified ({active_remote}:) • 0 Local Disk • OmniVault/ROMs/<Console>/{quota_note}",
+                    "free_gb": free_gb,
+                }
+            # Fallback to `rclone lsd` if backend doesn't support `about`
+            proc2 = await asyncio.create_subprocess_exec(
+                rclone_bin,
+                "lsd",
+                f"{active_remote}:",
+                "--max-depth",
+                "1",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            _, err2 = await asyncio.wait_for(proc2.communicate(), timeout=12.0)
+            if proc2.returncode == 0:
+                return {
+                    "status": "ok",
+                    "provider_id": pid,
+                    "mode": "api",
+                    "message": f"{entry['name']} rclone Direct Stream verified ({active_remote}:) • 0 Local Disk • OmniVault/ROMs/<Console>/",
+                    "free_gb": None,
+                }
+            err_txt = (err2 or stderr_b or b"").decode("utf-8", errors="ignore").strip()[:200]
+            return {"status": "error", "provider_id": pid, "mode": "api", "message": f"rclone check failed: {err_txt or 'Unknown error'}"}
+        except Exception as exc:
+            return {"status": "error", "provider_id": pid, "mode": "api", "message": f"rclone check error: {exc}"}
+
     pcfg = cfg["providers"][pid]
     token = str(pcfg.get("access_token") or "").strip()
     if not token and pcfg.get("refresh_token") and _resolve_oauth_client_id(pid, pcfg):
@@ -1212,14 +1705,22 @@ async def test_cloud_target(provider_id: str, override_payload: Optional[Dict[st
 
 def schedule_cloud_mount_eviction(file_path: Path, delay_secs: float = 15.0) -> None:
     """
-    On macOS, optionally invokes `/usr/bin/brctl evict` after iCloud / FileProvider syncs the file
-    so the ROM stays in iCloud Drive without occupying local SSD blocks.
+    On macOS, optionally evicts local cache blocks after iCloud (`/usr/bin/brctl evict`)
+    or FileProvider (`/usr/bin/fileproviderctl evict` for Google Drive / OneDrive Desktop mounts)
+    finishes syncing so the ROM stays cloud-only without occupying local SSD blocks.
     """
-    if sys.platform != "darwin" or not Path("/usr/bin/brctl").exists():
+    if sys.platform != "darwin":
         return
     p_str = str(file_path)
-    if "Mobile Documents" not in p_str and "CloudStorage" not in p_str:
+    cmd: Optional[List[str]] = None
+    if "Mobile Documents" in p_str and Path("/usr/bin/brctl").exists():
+        cmd = ["/usr/bin/brctl", "evict", p_str]
+    elif "CloudStorage" in p_str and Path("/usr/bin/fileproviderctl").exists():
+        cmd = ["/usr/bin/fileproviderctl", "evict", p_str]
+    if not cmd:
         return
+
+    clean_env = _clean_subprocess_env()
 
     async def _evict_later() -> None:
         await asyncio.sleep(delay_secs)
@@ -1227,9 +1728,10 @@ def schedule_cloud_mount_eviction(file_path: Path, delay_secs: float = 15.0) -> 
             if file_path.exists():
                 await asyncio.to_thread(
                     subprocess.run,
-                    ["/usr/bin/brctl", "evict", p_str],
+                    cmd,
                     capture_output=True,
                     check=False,
+                    env=clean_env,
                 )
         except Exception:
             pass
@@ -1356,6 +1858,171 @@ async def _open_cloud_upload_session(
     raise ValueError(f"Direct cloud streaming not supported for '{pid}'")
 
 
+def _build_rclone_rcat_cmd(
+    rclone_bin: str,
+    pid: str,
+    remote_name: str,
+    clean_plat: str,
+    filename: str,
+    total_bytes: int = 0,
+) -> Tuple[List[str], str]:
+    remote_rel = f"OmniVault/ROMs/{clean_plat}/{filename}"
+    remote_target = f"{remote_name}:{remote_rel}"
+    cmd = [rclone_bin, "rcat", remote_target, "--stats", "0"]
+    if pid == "gdrive":
+        cmd.extend(["--drive-chunk-size", "16M"])
+    if total_bytes > 0:
+        cmd.extend(["--size", str(total_bytes)])
+    return cmd, f"{CLOUD_PROVIDER_META[pid]['name']}:/{remote_rel}"
+
+
+async def _terminate_async_proc(proc: Optional[asyncio.subprocess.Process]) -> None:
+    if proc is None or proc.returncode is not None:
+        return
+    try:
+        proc.terminate()
+        await asyncio.wait_for(proc.wait(), timeout=2.0)
+    except Exception:
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            pass
+
+
+async def _stream_response_to_rclone_rcat(
+    rclone_bin: str,
+    pid: str,
+    remote_name: str,
+    clean_plat: str,
+    filename: str,
+    response: httpx.Response,
+    total_bytes: int,
+    progress_cb: Optional[Callable[[int, int, float], None]] = None,
+    is_paused_cb: Optional[Callable[[], bool]] = None,
+) -> Dict[str, Any]:
+    """Pipes an async HTTP response through RAM directly into `rclone rcat` with 0 bytes written to local disk."""
+    cmd, remote_path = _build_rclone_rcat_cmd(rclone_bin, pid, remote_name, clean_plat, filename, total_bytes)
+    proc: Optional[asyncio.subprocess.Process] = None
+    sent = 0
+    t_start = time.monotonic()
+    last_t = t_start
+    bytes_since = 0
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=_clean_subprocess_env(),
+        )
+        assert proc.stdin is not None
+        async for net_chunk in response.aiter_bytes(chunk_size=131072):
+            if is_paused_cb and is_paused_cb():
+                await _terminate_async_proc(proc)
+                return {"status": "paused"}
+            proc.stdin.write(net_chunk)
+            await proc.stdin.drain()
+            n = len(net_chunk)
+            sent += n
+            bytes_since += n
+            now = time.monotonic()
+            if progress_cb and (now - last_t >= 0.35):
+                elapsed = max(now - last_t, 0.01)
+                speed_mbps = (bytes_since / (1024 * 1024)) / elapsed
+                progress_cb(sent, total_bytes, speed_mbps)
+                last_t = now
+                bytes_since = 0
+
+        proc.stdin.close()
+        if hasattr(proc.stdin, "wait_closed"):
+            await proc.stdin.wait_closed()
+        _, stderr_b = await proc.communicate()
+        if proc.returncode != 0:
+            err_msg = (stderr_b or b"").decode("utf-8", errors="ignore").strip()[-240:]
+            raise RuntimeError(f"rclone rcat failed (exit {proc.returncode}): {err_msg or 'Upload error'}")
+        if sent < 1024:
+            raise ValueError(f"Streamed file is suspiciously small ({sent} bytes)")
+        if progress_cb:
+            total_elapsed = max(time.monotonic() - t_start, 0.01)
+            progress_cb(sent, total_bytes or sent, (sent / (1024 * 1024)) / total_elapsed)
+
+        return {
+            "status": "completed",
+            "provider": CLOUD_PROVIDER_META[pid]["name"],
+            "remote_path": remote_path,
+            "filename": filename,
+            "total_bytes": total_bytes or sent,
+            "zero_local_disk": True,
+        }
+    except asyncio.CancelledError:
+        await _terminate_async_proc(proc)
+        raise
+    except Exception:
+        await _terminate_async_proc(proc)
+        raise
+
+
+async def _upload_file_via_rclone_rcat(
+    rclone_bin: str,
+    pid: str,
+    remote_name: str,
+    clean_plat: str,
+    upload_path: Path,
+    progress_cb: Optional[Callable[[int, int, float], None]] = None,
+) -> Dict[str, Any]:
+    total_bytes = upload_path.stat().st_size
+    cmd, remote_path = _build_rclone_rcat_cmd(rclone_bin, pid, remote_name, clean_plat, upload_path.name, total_bytes)
+    proc: Optional[asyncio.subprocess.Process] = None
+    sent = 0
+    t_start = time.monotonic()
+    last_t = t_start
+    bytes_since = 0
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=_clean_subprocess_env(),
+        )
+        assert proc.stdin is not None
+        with open(upload_path, "rb") as fh:
+            while True:
+                chunk = await asyncio.to_thread(fh.read, 1024 * 1024)
+                if not chunk:
+                    break
+                proc.stdin.write(chunk)
+                await proc.stdin.drain()
+                n = len(chunk)
+                sent += n
+                bytes_since += n
+                now = time.monotonic()
+                if progress_cb and (now - last_t >= 0.35 or sent >= total_bytes):
+                    elapsed = max(now - last_t, 0.01)
+                    progress_cb(sent, total_bytes, (bytes_since / (1024 * 1024)) / elapsed)
+                    last_t = now
+                    bytes_since = 0
+
+        proc.stdin.close()
+        if hasattr(proc.stdin, "wait_closed"):
+            await proc.stdin.wait_closed()
+        _, stderr_b = await proc.communicate()
+        if proc.returncode != 0:
+            err_msg = (stderr_b or b"").decode("utf-8", errors="ignore").strip()[-240:]
+            raise RuntimeError(f"rclone upload failed (exit {proc.returncode}): {err_msg or 'Upload error'}")
+        return {
+            "provider": CLOUD_PROVIDER_META[pid]["name"],
+            "remote_path": remote_path,
+            "filename": upload_path.name,
+        }
+    except Exception:
+        await _terminate_async_proc(proc)
+        raise
+
+
 async def stream_url_to_cloud_api(
     provider_id: str,
     source_url: str,
@@ -1377,6 +2044,11 @@ async def stream_url_to_cloud_api(
     clean_plat = sanitize_console_folder_name(platform)
     filename = os.path.basename(fallback_filename or "rom_archive.zip") or "rom_archive.zip"
 
+    rclone_bin = _find_rclone_binary()
+    remotes_map = detect_rclone_remotes() if (pid in RCLONE_BACKEND_BY_PROVIDER and rclone_bin) else {"drive": [], "onedrive": []}
+    active_rclone = _get_active_rclone_remote(pid, pcfg, remotes_map)
+    use_rclone = bool(pid in RCLONE_BACKEND_BY_PROVIDER and rclone_bin and active_rclone)
+
     token = ""
     webdav_base = ""
     webdav_auth: Optional[httpx.BasicAuth] = None
@@ -1384,7 +2056,7 @@ async def stream_url_to_cloud_api(
         webdav_base, webdav_auth = _webdav_auth_and_base(pcfg)
         if not webdav_base:
             raise ValueError("WebDAV Cloud / NAS URL is not configured")
-    else:
+    elif not use_rclone:
         token = str(pcfg.get("access_token") or "").strip()
         if not token and pcfg.get("refresh_token") and _resolve_oauth_client_id(pid, pcfg):
             token = await _refresh_oauth_token(pid, pcfg)
@@ -1408,6 +2080,19 @@ async def stream_url_to_cloud_api(
                     filename = os.path.basename(parsed_cd)
 
             total_bytes = int(response.headers.get("Content-Length") or 0)
+
+            if use_rclone and rclone_bin:
+                return await _stream_response_to_rclone_rcat(
+                    rclone_bin=rclone_bin,
+                    pid=pid,
+                    remote_name=active_rclone,
+                    clean_plat=clean_plat,
+                    filename=filename,
+                    response=response,
+                    total_bytes=total_bytes,
+                    progress_cb=progress_cb,
+                    is_paused_cb=is_paused_cb,
+                )
 
             # WebDAV PUT streams directly through an async generator (~128 KB RAM buffer, 0 local disk)
             if pid == "webdav":
@@ -1548,6 +2233,19 @@ async def upload_file_to_cloud_api(
     clean_plat = sanitize_console_folder_name(platform)
 
     try:
+        rclone_bin = _find_rclone_binary()
+        remotes_map = detect_rclone_remotes() if (pid in RCLONE_BACKEND_BY_PROVIDER and rclone_bin) else {"drive": [], "onedrive": []}
+        active_rclone = _get_active_rclone_remote(pid, pcfg, remotes_map)
+        if pid in RCLONE_BACKEND_BY_PROVIDER and rclone_bin and active_rclone:
+            return await _upload_file_via_rclone_rcat(
+                rclone_bin=rclone_bin,
+                pid=pid,
+                remote_name=active_rclone,
+                clean_plat=clean_plat,
+                upload_path=upload_path,
+                progress_cb=progress_cb,
+            )
+
         async with httpx.AsyncClient(timeout=120.0, verify=False) as client:
             if pid == "webdav":
                 webdav_base, webdav_auth = _webdav_auth_and_base(pcfg)

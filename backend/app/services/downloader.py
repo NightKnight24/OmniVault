@@ -554,20 +554,24 @@ async def download_file_worker(
             def _on_stream_progress(sent: int, total: int, speed_mbps: float) -> None:
                 nonlocal last_emit
                 now_m = time.monotonic()
-                if now_m - last_emit < 0.35 and sent < total:
+                if now_m - last_emit < 0.35 and (total <= 0 or sent < total):
                     return
                 last_emit = now_m
-                pct = min(99.9, round((sent / max(total, 1)) * 100.0, 1))
-                rem_b = max(0, total - sent)
-                eta_s = int(rem_b / max(speed_mbps * 1024 * 1024, 1)) if speed_mbps > 0 else 0
-                eta_txt = f"{eta_s}s" if eta_s < 60 else f"{eta_s // 60}m {eta_s % 60}s"
+                pct = 0.0 if total <= 0 else min(99.9, round((sent / total) * 100.0, 1))
+                if total > 0 and speed_mbps > 0:
+                    rem_b = max(0, total - sent)
+                    eta_s = int(rem_b / max(speed_mbps * 1024 * 1024, 1))
+                    eta_txt = f"{eta_s}s" if eta_s < 60 else f"{eta_s // 60}m {eta_s % 60}s"
+                    eta_disp = f"Direct → {target_label} ({eta_txt})"
+                else:
+                    eta_disp = f"Direct → {target_label} (Streaming...)"
                 st = {
                     "status": "downloading",
                     "progress": pct,
                     "downloaded_bytes": sent,
                     "total_bytes": total,
                     "speed": f"☁️ {speed_mbps:.1f} MB/s",
-                    "eta": f"Direct → {target_label} ({eta_txt})",
+                    "eta": eta_disp,
                 }
                 if download_id in DOWNLOAD_STATES:
                     DOWNLOAD_STATES[download_id].update(st)
