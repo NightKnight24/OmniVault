@@ -295,6 +295,141 @@ None of the sites below are hardcoded into OmniVault. Copy this JSON block (or s
       }
     },
     {
+      "id": "romshq",
+      "name": "RomsHQ",
+      "url": "https://romshq.com/",
+      "adapter": "wp_hoster",
+      "type": "Switch / Switch 2 & Modern ROM Mirror",
+      "description": "Nintendo Switch, Switch 2, and modern ROM catalog with direct hoster mirrors (DataNodes, Buzzheavier, Real-Debrid).",
+      "platforms": ["Switch2", "Switch", "PS5", "PS4", "3DS", "WiiU", "Wii", "GameCube", "Windows"],
+      "search_template": "https://romshq.com/?s={title}",
+      "supports_direct_download": false,
+      "priority": 21,
+      "is_enabled": true,
+      "config": {
+        "search_path": "/?s={query}",
+        "link_selector": "a[href*='/game/']",
+        "exclude_path_parts": ["/category/", "/tag/", "/author/", "/sign-in", "/sign-up", "page/", "#"],
+        "title_clean_regex": "\\b(Final Release \\d{4}|Download|Free Download|NSP|XCI|ROM)\\b",
+        "file_kind": "rom"
+      }
+    },
+    {
+      "id": "nxbrew",
+      "name": "NXBrew",
+      "url": "https://nxbrew.net/",
+      "adapter": "wp_hoster",
+      "type": "Nintendo Switch NSP/XCI Mirror",
+      "description": "Nintendo Switch & Switch 2 NSP/XCI/NSZ Base, Update, and DLC mirror with Real-Debrid hoster extraction.",
+      "platforms": ["Switch", "Switch2"],
+      "search_template": "https://nxbrew.net/?s={title}",
+      "supports_direct_download": false,
+      "priority": 23,
+      "is_enabled": true,
+      "config": {
+        "search_path": "/?s={query}",
+        "link_selector": "h2 a, h3 a, a[rel='bookmark']",
+        "title_clean_regex": "\\b(NSP|XCI|NSZ|Switch|ROM|Free Download|Download)\\b",
+        "file_kind": "rom"
+      }
+    },
+    {
+      "id": "nswmara",
+      "name": "NSWMara",
+      "url": "https://nswmara.com/",
+      "adapter": "wp_hoster",
+      "type": "Nintendo Switch & Switch 2 Mirror",
+      "description": "Switch & Switch 2 NSP/XCI ROM archive with dedicated base, update, and DLC download pages.",
+      "platforms": ["Switch", "Switch2"],
+      "search_template": "https://nswmara.com/?s={title}",
+      "supports_direct_download": false,
+      "priority": 25,
+      "is_enabled": true,
+      "config": {
+        "search_path": "/?s={query}",
+        "link_selector": "a[href*='/roms/']",
+        "subpage_link_regex": "\\?download(?:=\\d+)?",
+        "exclude_path_parts": ["/series/", "/category/", "/tag/", "/author/", "page/", "#"],
+        "title_clean_regex": "\\b(HOMEBREW|NSP|XCI|UPDATE|DLC|Version:[\\s0-9.]+|Switch ROMs)\\b",
+        "file_kind": "rom"
+      }
+    },
+    {
+      "id": "switchsrom",
+      "name": "SwitchsROM",
+      "url": "https://app.switchsrom.com/",
+      "adapter": "wp_hoster",
+      "type": "Nintendo Switch NSP/XCI Mirror",
+      "description": "Switch & Switch 2 ROM library with versioned base/update download pages.",
+      "platforms": ["Switch", "Switch2"],
+      "search_template": "https://app.switchsrom.com/?s={title}",
+      "supports_direct_download": false,
+      "priority": 27,
+      "is_enabled": true,
+      "config": {
+        "search_path": "/?s={query}",
+        "link_selector": "h2 a, h3 a, article a",
+        "subpage_link_regex": "/download/",
+        "title_clean_regex": "\\b(Download|ROM|v[0-9.]+|NSP|XCI)\\b",
+        "file_kind": "rom"
+      }
+    },
+    {
+      "id": "yuumijungle",
+      "name": "YuumiJungle",
+      "url": "https://yuumijungle.com/",
+      "adapter": "wp_hoster",
+      "type": "Switch 2 & Multi-System Mirror",
+      "description": "Switch 2, Switch, Wii, N64, 3DS, GBA, SNES, PSP & PC ROM catalog with multi-hoster download center.",
+      "platforms": ["Switch2", "Switch", "Wii", "N64", "3DS", "GBA", "SNES", "PSP", "Windows"],
+      "search_template": "https://yuumijungle.com/?s={title}&yjunh_lang=en",
+      "supports_direct_download": false,
+      "priority": 28,
+      "is_enabled": true,
+      "config": {
+        "search_path": "/?s={query}&yjunh_lang=en",
+        "link_selector": "h2 a, h3 a, article a",
+        "subpage_link_regex": "centro-de-descargas.*item=(?:base|addon)",
+        "exclude_path_parts": ["/category/", "/tag/", "/author/", "/privacy-copyright", "page/", "#"],
+        "title_clean_regex": "\\b(Descargar|Gratis|para|Nintendo Switch 2|Nintendo Switch|PC|en Espa[nñ]ol|Desencriptado|ROM|ISO|Download|Free)\\b",
+        "file_kind": "rom"
+      }
+    },
+    {
+      "id": "nintendo-roms",
+      "name": "Nintendo-ROMs",
+      "url": "https://nintendo-roms.com/",
+      "adapter": "wp_hoster",
+      "type": "Nintendo Multi-System Mirror",
+      "description": "Nintendo Switch 2, Switch, 3DS, NDS, Wii U, Wii, GameCube, N64, SNES, NES & Game Boy ROM index.",
+      "platforms": ["Switch2", "Switch", "3DS", "NDS", "WiiU", "Wii", "GameCube", "N64", "SNES", "NES", "GBA", "GBC", "GB"],
+      "search_template": "https://nintendo-roms.com/?s={title}",
+      "supports_direct_download": false,
+      "priority": 29,
+      "is_enabled": true,
+      "config": {
+        "search_path": "/?s={query}",
+        "link_selector": "a[href*='/rom/']",
+        "exclude_path_parts": ["/genre/", "/category/", "/tag/", "/author/", "/about/", "page/", "#"],
+        "title_clean_regex": "\\b(NSP|XCI|ROM|Update|Free Download|Download|for Nintendo Switch 2?)\\b",
+        "file_kind": "rom"
+      }
+    },
+    {
+      "id": "romheaven",
+      "name": "Romheaven",
+      "url": "https://romheaven.com/",
+      "adapter": "directory_link",
+      "type": "Multi-System Preservation Directory",
+      "description": "Interactive SPA directory for retro ROMs, Nintendo Switch titles, ROM hacks, and Steam depots.",
+      "platforms": ["Switch2", "Switch", "3DS", "NDS", "PSP", "PSVita", "PS1", "PS2", "PS3", "GameCube", "Wii", "N64", "GBA", "SNES", "NES", "Genesis", "Dreamcast", "Windows"],
+      "search_template": "https://romheaven.com/",
+      "supports_direct_download": false,
+      "priority": 65,
+      "is_enabled": true,
+      "config": {}
+    },
+    {
       "id": "blueroms",
       "name": "BlueRoms",
       "url": "https://www.blueroms.ws/",
